@@ -6,7 +6,7 @@ build/
 dist/
 .tox/
 wheelhouse/
-greenlet.egg-info/
+greenstack.egg-info/
 /doc/_build
 __pycache__/
 /.ropeproject/

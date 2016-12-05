@@ -3,9 +3,9 @@ set -e
 export PYTHONUNBUFFERED=1
 export PYTHONDONTWRITEBYTECODE=1
 
-if [ -d /greenlet -a -d /opt/python ]; then
+if [ -d /greenstack -a -d /opt/python ]; then
     # Running inside docker
-    cd /greenlet
+    cd /greenstack
     rm -rf wheelhouse
     for variant in /opt/python/*; do
         rm -rf dist build *.egg-info
@@ -16,4 +16,4 @@ if [ -d /greenlet -a -d /opt/python ]; then
     exit 0
 fi
 
-docker run --rm -ti -v "$(pwd):/greenlet:Z" quay.io/pypa/manylinux1_x86_64 /greenlet/$(basename $0)
+docker run --rm -ti -v "$(pwd):/greenstack:Z" quay.io/pypa/manylinux1_x86_64 /greenstack/$(basename $0)

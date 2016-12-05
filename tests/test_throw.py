@@ -1,7 +1,7 @@
 import sys
 import unittest
 
-from greenlet import greenlet
+from greenstack import greenlet
 
 
 def switch(*args):

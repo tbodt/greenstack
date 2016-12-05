@@ -1,5 +1,5 @@
 import unittest
-from greenlet import greenlet
+from greenstack import greenlet
 
 
 class genlet(greenlet):

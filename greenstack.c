@@ -1,65 +1,11 @@
 /* vim:set noet ts=8 sw=8 : */
 
-#define GREENLET_MODULE
+#define GREENSTACK_MODULE
 
-#include "greenlet.h"
+#include "greenstack.h"
 #include "structmember.h"
 
-
-/***********************************************************
-
-A PyGreenlet is a range of C stack addresses that must be
-saved and restored in such a way that the full range of the
-stack contains valid data when we switch to it.
-
-Stack layout for a greenlet:
-
-               |     ^^^       |
-               |  older data   |
-               |               |
-  stack_stop . |_______________|
-        .      |               |
-        .      | greenlet data |
-        .      |   in stack    |
-        .    * |_______________| . .  _____________  stack_copy + stack_saved
-        .      |               |     |             |
-        .      |     data      |     |greenlet data|
-        .      |   unrelated   |     |    saved    |
-        .      |      to       |     |   in heap   |
- stack_start . |     this      | . . |_____________| stack_copy
-               |   greenlet    |
-               |               |
-               |  newer data   |
-               |     vvv       |
-
-
-Note that a greenlet's stack data is typically partly at its correct
-place in the stack, and partly saved away in the heap, but always in
-the above configuration: two blocks, the more recent one in the heap
-and the older one still in the stack (either block may be empty).
-
-Greenlets are chained: each points to the previous greenlet, which is
-the one that owns the data currently in the C stack above my
-stack_stop.  The currently running greenlet is the first element of
-this chain.  The main (initial) greenlet is the last one.  Greenlets
-whose stack is entirely in the heap can be skipped from the chain.
-
-The chain is not related to execution order, but only to the order
-in which bits of C stack happen to belong to greenlets at a particular
-point in time.
-
-The main greenlet doesn't have a stack_stop: it is responsible for the
-complete rest of the C stack, and we don't know where it begins.  We
-use (char*) -1, the largest possible address.
-
-States:
-  stack_stop == NULL && stack_start == NULL:  did not start yet
-  stack_stop != NULL && stack_start == NULL:  already finished
-  stack_stop != NULL && stack_start != NULL:  active
-
-The running greenlet's stack_start is undefined but not NULL.
-
- ***********************************************************/
+/* explanation was here */
 
 /* Python <= 2.5 support */
 #if PY_MAJOR_VERSION < 3
@@ -83,11 +29,13 @@ The running greenlet's stack_start is undefined but not NULL.
 typedef int Py_ssize_t;
 #endif
 
-extern PyTypeObject PyGreenlet_Type;
+#define PyGreenlet PyStackGreenlet
+#define PyGreenlet_Type PyStackGreenlet_Type
+extern PyTypeObject PyStackGreenlet_Type;
 
-/* Defines that customize greenlet module behaviour */
-#ifndef GREENLET_USE_GC
-#define GREENLET_USE_GC 1
+/* Defines that customize greenstack module behaviour */
+#ifndef GREENSTACK_USE_GC
+#define GREENSTACK_USE_GC 1
 #endif
 
 /*** global state ***/
@@ -95,10 +43,10 @@ extern PyTypeObject PyGreenlet_Type;
 /* In the presence of multithreading, this is a bit tricky:
 
    - ts_current always store a reference to a greenlet, but it is
-     not really the current greenlet after a thread switch occurred.
+   not really the current greenlet after a thread switch occurred.
 
    - each *running* greenlet uses its run_info field to know which
-     thread it is attached to.  A greenlet can only run in the thread
+   thread it is attached to.  A greenlet can only run in the thread
      where it was created.  This run_info is a ref to tstate->dict.
 
    - the thread state dict is used to save and restore ts_current,
@@ -109,7 +57,7 @@ extern PyTypeObject PyGreenlet_Type;
 static PyGreenlet* volatile ts_origin = NULL;
 /* Strong reference to the current greenlet in this thread state */
 static PyGreenlet* volatile ts_current = NULL;
-/* NULL if error, otherwise args tuple to pass around during slp switch */
+/* NULL if error, otherwise args tuple to pass around during coro switch */
 static PyObject* volatile ts_passaround_args = NULL;
 static PyObject* volatile ts_passaround_kwargs = NULL;
 
@@ -121,26 +69,33 @@ static PyObject* volatile ts_passaround_kwargs = NULL;
 
 static PyObject* ts_curkey;
 static PyObject* ts_delkey;
-static PyObject* PyExc_GreenletError;
-static PyObject* PyExc_GreenletExit;
+static PyObject* PyExc_StackGreenletError;
+#define PyExc_GreenletError PyExc_StackGreenletError
+static PyObject* PyExc_StackGreenletExit;
+#define PyExc_GreenletExit PyExc_StackGreenletExit
 static PyObject* ts_empty_tuple;
 static PyObject* ts_empty_dict;
 
-#if GREENLET_USE_GC
-#define GREENLET_GC_FLAGS Py_TPFLAGS_HAVE_GC
-#define GREENLET_tp_alloc PyType_GenericAlloc
-#define GREENLET_tp_free PyObject_GC_Del
-#define GREENLET_tp_traverse green_traverse
-#define GREENLET_tp_clear green_clear
-#define GREENLET_tp_is_gc green_is_gc
-#else /* GREENLET_USE_GC */
-#define GREENLET_GC_FLAGS 0
-#define GREENLET_tp_alloc 0
-#define GREENLET_tp_free 0
-#define GREENLET_tp_traverse 0
-#define GREENLET_tp_clear 0
-#define GREENLET_tp_is_gc 0
-#endif /* !GREENLET_USE_GC */
+#define PyGreenlet_STARTED PyStackGreenlet_STARTED
+#define PyGreenlet_ACTIVE PyStackGreenlet_ACTIVE
+#define PyGreenlet_MAIN PyStackGreenlet_MAIN
+#define PyGreenlet_Check PyStackGreenlet_Check
+
+#if GREENSTACK_USE_GC
+#define GREENSTACK_GC_FLAGS Py_TPFLAGS_HAVE_GC
+#define GREENSTACK_tp_alloc PyType_GenericAlloc
+#define GREENSTACK_tp_free PyObject_GC_Del
+#define GREENSTACK_tp_traverse green_traverse
+#define GREENSTACK_tp_clear green_clear
+#define GREENSTACK_tp_is_gc green_is_gc
+#else /* GREENSTACK_USE_GC */
+#define GREENSTACK_GC_FLAGS 0
+#define GREENSTACK_tp_alloc 0
+#define GREENSTACK_tp_free 0
+#define GREENSTACK_tp_traverse 0
+#define GREENSTACK_tp_clear 0
+#define GREENSTACK_tp_is_gc 0
+#endif /* !GREENSTACK_USE_GC */
 
 static PyGreenlet* green_create_main(void)
 {
@@ -487,7 +442,7 @@ static void g_trampoline(struct trampoline_data *data) {
 	}
 	/* We ran out of parents, cannot continue */
 	PyErr_WriteUnraisable((PyObject *) self);
-	Py_FatalError("greenlets cannot continue");
+	Py_FatalError("greenstack cannot continue");
 }
 
 static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
@@ -641,7 +596,7 @@ static int kill_greenlet(PyGreenlet* self)
 	}
 }
 
-#if GREENLET_USE_GC
+#if GREENSTACK_USE_GC
 static int
 green_traverse(PyGreenlet *self, visitproc visit, void *arg)
 {
@@ -721,7 +676,7 @@ static void green_dealloc_safe(PyGreenlet* self)
 			Py_ssize_t refcnt = Py_REFCNT(self);
 			_Py_NewReference((PyObject*) self);
 			Py_REFCNT(self) = refcnt;
-#if GREENLET_USE_GC
+#if GREENSTACK_USE_GC
 			PyObject_GC_Track((PyObject *)self);
 #endif
 			_Py_DEC_REFTOTAL;
@@ -740,7 +695,7 @@ static void green_dealloc_safe(PyGreenlet* self)
 	Py_TYPE(self)->tp_free((PyObject*) self);
 }
 
-#if GREENLET_USE_GC
+#if GREENSTACK_USE_GC
 static void green_dealloc(PyGreenlet* self)
 {
 	PyObject_GC_UnTrack((PyObject *)self);
@@ -828,7 +783,7 @@ static PyObject* green_switch(
 PyDoc_STRVAR(green_throw_doc,
 "Switches execution to the greenlet ``g``, but immediately raises the\n"
 "given exception in ``g``.  If no argument is provided, the exception\n"
-"defaults to ``greenlet.GreenletExit``.  The normal exception\n"
+"defaults to ``greenstack.GreenletExit``.  The normal exception\n"
 "propagation rules apply, as described above.  Note that calling this\n"
 "method is almost equivalent to the following::\n"
 "\n"
@@ -838,7 +793,7 @@ PyDoc_STRVAR(green_throw_doc,
 "    g_raiser.switch()\n"
 "\n"
 "except that this trick does not work for the\n"
-"``greenlet.GreenletExit`` exception, which would not propagate\n"
+"``greenstack.GreenletExit`` exception, which would not propagate\n"
 "from ``g_raiser`` to ``g``.\n");
 
 static PyObject *
@@ -1179,7 +1134,7 @@ static PyNumberMethods green_as_number = {
 
 PyTypeObject PyGreenlet_Type = {
 	PyVarObject_HEAD_INIT(NULL, 0)
-	"greenlet.greenlet",                    /* tp_name */
+	"greenstack.greenlet",                    /* tp_name */
 	sizeof(PyGreenlet),                     /* tp_basicsize */
 	0,                                      /* tp_itemsize */
 	/* methods */
@@ -1198,14 +1153,14 @@ PyTypeObject PyGreenlet_Type = {
 	0,                                      /* tp_getattro */
 	0,                                      /* tp_setattro */
 	0,                                      /* tp_as_buffer*/
-	Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | GREENLET_GC_FLAGS, /* tp_flags */
+	Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | GREENSTACK_GC_FLAGS, /* tp_flags */
 	"greenlet(run=None, parent=None) -> greenlet\n\n"
 	"Creates a new greenlet object (without running it).\n\n"
 	" - *run* -- The callable to invoke.\n"
 	" - *parent* -- The parent greenlet. The default is the current "
 	"greenlet.",                            /* tp_doc */
-	(traverseproc)GREENLET_tp_traverse,     /* tp_traverse */
-	(inquiry)GREENLET_tp_clear,             /* tp_clear */
+	(traverseproc)GREENSTACK_tp_traverse,     /* tp_traverse */
+	(inquiry)GREENSTACK_tp_clear,             /* tp_clear */
 	0,                                      /* tp_richcompare */
 	offsetof(PyGreenlet, weakreflist),      /* tp_weaklistoffset */
 	0,                                      /* tp_iter */
@@ -1219,10 +1174,10 @@ PyTypeObject PyGreenlet_Type = {
 	0,                                      /* tp_descr_set */
 	offsetof(PyGreenlet, dict),             /* tp_dictoffset */
 	(initproc)green_init,                   /* tp_init */
-	GREENLET_tp_alloc,                      /* tp_alloc */
+	GREENSTACK_tp_alloc,                      /* tp_alloc */
 	green_new,                              /* tp_new */
-	GREENLET_tp_free,                       /* tp_free */
-	(inquiry)GREENLET_tp_is_gc,             /* tp_is_gc */
+	GREENSTACK_tp_free,                       /* tp_free */
+	(inquiry)GREENSTACK_tp_is_gc,             /* tp_is_gc */
 };
 
 static PyObject* mod_getcurrent(PyObject* self)
@@ -1248,49 +1203,49 @@ static char* copy_on_greentype[] = {
 #if PY_MAJOR_VERSION >= 3
 #define INITERROR return NULL
 
-static struct PyModuleDef greenlet_module_def = {
+static struct PyModuleDef greenstack_module_def = {
 	PyModuleDef_HEAD_INIT,
-	"greenlet",
+	"greenstack",
 	NULL,
 	-1,
 	GreenMethods,
 };
 
 PyMODINIT_FUNC
-PyInit_greenlet(void)
+PyInit_greenstack(void)
 #else
 #define INITERROR return
 
 PyMODINIT_FUNC
-initgreenlet(void)
+initgreenstack(void)
 #endif
 {
 	PyObject* m = NULL;
 	char** p = NULL;
 	PyObject *c_api_object;
-	static void *_PyGreenlet_API[PyGreenlet_API_pointers];
+	static void *_PyGreenlet_API[PyStackGreenlet_API_pointers];
 
 #if PY_MAJOR_VERSION >= 3
-	m = PyModule_Create(&greenlet_module_def);
+	m = PyModule_Create(&greenstack_module_def);
 #else
-	m = Py_InitModule("greenlet", GreenMethods);
+	m = Py_InitModule("greenstack", GreenMethods);
 #endif
 	if (m == NULL)
 	{
 		INITERROR;
 	}
 
-	if (PyModule_AddStringConstant(m, "__version__", GREENLET_VERSION) < 0)
+	if (PyModule_AddStringConstant(m, "__version__", GREENSTACK_VERSION) < 0)
 	{
 		INITERROR;
 	}
 
 #if PY_MAJOR_VERSION >= 3
-	ts_curkey = PyUnicode_InternFromString("__greenlet_ts_curkey");
-	ts_delkey = PyUnicode_InternFromString("__greenlet_ts_delkey");
+	ts_curkey = PyUnicode_InternFromString("__greenstack_ts_curkey");
+	ts_delkey = PyUnicode_InternFromString("__greenstack_ts_delkey");
 #else
-	ts_curkey = PyString_InternFromString("__greenlet_ts_curkey");
-	ts_delkey = PyString_InternFromString("__greenlet_ts_delkey");
+	ts_curkey = PyString_InternFromString("__greenstack_ts_curkey");
+	ts_delkey = PyString_InternFromString("__greenstack_ts_delkey");
 #endif
 	if (ts_curkey == NULL || ts_delkey == NULL)
 	{
@@ -1300,19 +1255,19 @@ initgreenlet(void)
 	{
 		INITERROR;
 	}
-	PyExc_GreenletError = PyErr_NewException("greenlet.error", NULL, NULL);
+	PyExc_GreenletError = PyErr_NewException("greenstack.error", NULL, NULL);
 	if (PyExc_GreenletError == NULL)
 	{
 		INITERROR;
 	}
 #if PY_MAJOR_VERSION >= 3 || (PY_MAJOR_VERSION == 2 && PY_MINOR_VERSION >= 5)
-	PyExc_GreenletExit = PyErr_NewException("greenlet.GreenletExit",
+	PyExc_StackGreenletExit = PyErr_NewException("greenstack.GreenletExit",
 	                                        PyExc_BaseException, NULL);
 #else
-	PyExc_GreenletExit = PyErr_NewException("greenlet.GreenletExit",
+	PyExc_StackGreenletExit = PyErr_NewException("greenstack.GreenletExit",
 	                                        NULL, NULL);
 #endif
-	if (PyExc_GreenletExit == NULL)
+	if (PyExc_StackGreenletExit == NULL)
 	{
 		INITERROR;
 	}
@@ -1337,11 +1292,11 @@ initgreenlet(void)
 
 	Py_INCREF(&PyGreenlet_Type);
 	PyModule_AddObject(m, "greenlet", (PyObject*) &PyGreenlet_Type);
-	Py_INCREF(PyExc_GreenletError);
-	PyModule_AddObject(m, "error", PyExc_GreenletError);
-	Py_INCREF(PyExc_GreenletExit);
-	PyModule_AddObject(m, "GreenletExit", PyExc_GreenletExit);
-	PyModule_AddObject(m, "GREENLET_USE_GC", PyBool_FromLong(GREENLET_USE_GC));
+	Py_INCREF(PyExc_StackGreenletError);
+	PyModule_AddObject(m, "error", PyExc_StackGreenletError);
+	Py_INCREF(PyExc_StackGreenletExit);
+	PyModule_AddObject(m, "GreenletExit", PyExc_StackGreenletExit);
+	PyModule_AddObject(m, "GREENSTACK_USE_GC", PyBool_FromLong(GREENSTACK_USE_GC));
 
 	/* also publish module-level data as attributes of the greentype. */
 	for (p=copy_on_greentype; *p; p++) {
@@ -1356,23 +1311,23 @@ initgreenlet(void)
 	 */
 
 	/* types */
-	_PyGreenlet_API[PyGreenlet_Type_NUM] = (void *) &PyGreenlet_Type;
+	_PyGreenlet_API[PyStackGreenlet_Type_NUM] = (void *) &PyGreenlet_Type;
 
 	/* exceptions */
-	_PyGreenlet_API[PyExc_GreenletError_NUM] = (void *) PyExc_GreenletError;
-	_PyGreenlet_API[PyExc_GreenletExit_NUM] = (void *) PyExc_GreenletExit;
+	_PyGreenlet_API[PyExc_StackGreenletError_NUM] = (void *) PyExc_StackGreenletError;
+	_PyGreenlet_API[PyExc_StackGreenletExit_NUM] = (void *) PyExc_StackGreenletExit;
 
 	/* methods */
-	_PyGreenlet_API[PyGreenlet_New_NUM] = (void *) PyGreenlet_New;
-	_PyGreenlet_API[PyGreenlet_GetCurrent_NUM] =
+	_PyGreenlet_API[PyStackGreenlet_New_NUM] = (void *) PyGreenlet_New;
+	_PyGreenlet_API[PyStackGreenlet_GetCurrent_NUM] =
 		(void *) PyGreenlet_GetCurrent;
-	_PyGreenlet_API[PyGreenlet_Throw_NUM] = (void *) PyGreenlet_Throw;
-	_PyGreenlet_API[PyGreenlet_Switch_NUM] = (void *) PyGreenlet_Switch;
-	_PyGreenlet_API[PyGreenlet_SetParent_NUM] =
+	_PyGreenlet_API[PyStackGreenlet_Throw_NUM] = (void *) PyGreenlet_Throw;
+	_PyGreenlet_API[PyStackGreenlet_Switch_NUM] = (void *) PyGreenlet_Switch;
+	_PyGreenlet_API[PyStackGreenlet_SetParent_NUM] =
 		(void *) PyGreenlet_SetParent;
 
-#ifdef GREENLET_USE_PYCAPSULE
-	c_api_object = PyCapsule_New((void *) _PyGreenlet_API, "greenlet._C_API", NULL);
+#ifdef GREENSTACK_USE_PYCAPSULE
+	c_api_object = PyCapsule_New((void *) _PyGreenlet_API, "greenstack._C_API", NULL);
 #else
 	c_api_object = PyCObject_FromVoidPtr((void *) _PyGreenlet_API, NULL);
 #endif

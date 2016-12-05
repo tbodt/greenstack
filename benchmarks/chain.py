@@ -7,18 +7,18 @@ where each coroutine will increment the value before passing it along.
 import optparse
 import time
 
-import greenlet
+import greenstack
 
 
 def link(next_greenlet):
-    value = greenlet.getcurrent().parent.switch()
+    value = greenstack.getcurrent().parent.switch()
     next_greenlet.switch(value + 1)
 
 
 def chain(n):
-    start_node = greenlet.getcurrent()
+    start_node = greenstack.getcurrent()
     for i in xrange(n):
-        g = greenlet.greenlet(link)
+        g = greenstack.greenlet(link)
         g.switch(start_node)
         start_node = g
     return start_node.switch(0)

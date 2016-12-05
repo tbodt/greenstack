@@ -9,7 +9,7 @@ TEST_EXTENSIONS = [
               include_dirs=[os.path.curdir]),
 ]
 
-if os.environ.get('GREENLET_TEST_CPP', 'yes').lower() not in ('0', 'no', 'false'):
+if os.environ.get('GREENSTACK_TEST_CPP', 'yes').lower() not in ('0', 'no', 'false'):
     TEST_EXTENSIONS_CPP = [
         Extension('_test_extension_cpp',
                   [os.path.join('tests', '_test_extension_cpp.cpp')],

@@ -27,9 +27,9 @@ if hasattr(sys, "pypy_version_info"):
     ext_modules = []
     headers = []
 else:
-    headers = ['greenlet.h']
+    headers = ['greenstack.h']
 
-    if sys.platform == 'win32' and os.environ.get('GREENLET_STATIC_RUNTIME') in ('1', 'yes'):
+    if sys.platform == 'win32' and os.environ.get('GREENSTACK_STATIC_RUNTIME') in ('1', 'yes'):
         extra_compile_args = ['/MT']
     elif hasattr(os, 'uname') and os.uname()[4] in ['ppc64el', 'ppc64le']:
         extra_compile_args = ['-fno-tree-dominator-opts']
@@ -37,23 +37,23 @@ else:
         extra_compile_args = []
 
     ext_modules = [Extension(
-        name='greenlet',
-        sources=['greenlet.c', 'libcoro/coro.c'],
+        name='greenstack',
+        sources=['greenstack.c', 'libcoro/coro.c'],
         extra_compile_args=extra_compile_args,
-        depends=['greenlet.h', 'libcoro/coro.h'])]
+        depends=['greenstack.h', 'libcoro/coro.h'])]
 
 from distutils.core import Command
 from my_build_ext import build_ext
 
 
 setup(
-    name="greenlet",
+    name="greenstack",
     version='0.4.10',
     description='Lightweight in-process concurrent programming',
     long_description=readfile("README.rst"),
-    maintainer="Alexey Borzenkov",
-    maintainer_email="snaury@gmail.com",
-    url="https://github.com/python-greenlet/greenlet",
+    maintainer="Theodore Dubois",
+    maintainer_email="tblodt@icloud.com",
+    url="http://github.com/tbodt/greenstack",
     license="MIT License",
     platforms=['any'],
     headers=headers,

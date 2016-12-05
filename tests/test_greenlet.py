@@ -4,7 +4,7 @@ import time
 import threading
 import unittest
 
-from greenlet import greenlet
+from greenstack import greenlet
 
 try:
     from abc import ABCMeta, abstractmethod

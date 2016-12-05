@@ -3,21 +3,21 @@ import sys
 import unittest
 import weakref
 
-import greenlet
+import greenstack
 
 
 class GCTests(unittest.TestCase):
     def test_dead_circular_ref(self):
-        o = weakref.ref(greenlet.greenlet(greenlet.getcurrent).switch())
+        o = weakref.ref(greenstack.greenlet(greenstack.getcurrent).switch())
         gc.collect()
         self.assertTrue(o() is None)
         self.assertFalse(gc.garbage, gc.garbage)
 
-    if greenlet.GREENLET_USE_GC:
+    if greenstack.GREENSTACK_USE_GC:
         # These only work with greenlet gc support
 
         def test_circular_greenlet(self):
-            class circular_greenlet(greenlet.greenlet):
+            class circular_greenlet(greenstack.greenlet):
                 pass
             o = circular_greenlet()
             o.self = o
@@ -27,9 +27,9 @@ class GCTests(unittest.TestCase):
             self.assertFalse(gc.garbage, gc.garbage)
 
         def test_inactive_ref(self):
-            class inactive_greenlet(greenlet.greenlet):
+            class inactive_greenlet(greenstack.greenlet):
                 def __init__(self):
-                    greenlet.greenlet.__init__(self, run=self.run)
+                    greenstack.greenlet.__init__(self, run=self.run)
 
                 def run(self):
                     pass
@@ -60,18 +60,18 @@ class GCTests(unittest.TestCase):
                 def __del__(self):
                     pass
             array = []
-            parent = greenlet.getcurrent()
+            parent = greenstack.getcurrent()
             def greenlet_body():
-                greenlet.getcurrent().object = object_with_finalizer()
+                greenstack.getcurrent().object = object_with_finalizer()
                 try:
                     parent.switch()
                 finally:
-                    del greenlet.getcurrent().object
-            g = greenlet.greenlet(greenlet_body)
+                    del greenstack.getcurrent().object
+            g = greenstack.greenlet(greenlet_body)
             g.array = array
             array.append(g)
             g.switch()
             del array
             del g
-            greenlet.getcurrent()
+            greenstack.getcurrent()
             gc.collect()

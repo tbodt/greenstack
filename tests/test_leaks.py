@@ -4,7 +4,7 @@ import gc
 
 import time
 import weakref
-import greenlet
+import greenstack
 import threading
 
 
@@ -12,21 +12,21 @@ class ArgRefcountTests(unittest.TestCase):
     def test_arg_refs(self):
         args = ('a', 'b', 'c')
         refcount_before = sys.getrefcount(args)
-        g = greenlet.greenlet(
-            lambda *args: greenlet.getcurrent().parent.switch(*args))
+        g = greenstack.greenlet(
+            lambda *args: greenstack.getcurrent().parent.switch(*args))
         for i in range(100):
             g.switch(*args)
         self.assertEqual(sys.getrefcount(args), refcount_before)
 
     def test_kwarg_refs(self):
         kwargs = {}
-        g = greenlet.greenlet(
-            lambda **kwargs: greenlet.getcurrent().parent.switch(**kwargs))
+        g = greenstack.greenlet(
+            lambda **kwargs: greenstack.getcurrent().parent.switch(**kwargs))
         for i in range(100):
             g.switch(**kwargs)
         self.assertEqual(sys.getrefcount(kwargs), 2)
 
-    if greenlet.GREENLET_USE_GC:
+    if greenstack.GREENSTACK_USE_GC:
         # These only work with greenlet gc support
 
         def recycle_threads(self):
@@ -47,17 +47,17 @@ class ArgRefcountTests(unittest.TestCase):
             gg = []
             def worker():
                 # only main greenlet present
-                gg.append(weakref.ref(greenlet.getcurrent()))
+                gg.append(weakref.ref(greenstack.getcurrent()))
             for i in range(2):
                 t = threading.Thread(target=worker)
                 t.start()
                 t.join()
                 del t
-            greenlet.getcurrent() # update ts_current
+            greenstack.getcurrent() # update ts_current
             self.recycle_threads()
-            greenlet.getcurrent() # update ts_current
+            greenstack.getcurrent() # update ts_current
             gc.collect()
-            greenlet.getcurrent() # update ts_current
+            greenstack.getcurrent() # update ts_current
             for g in gg:
                 self.assertTrue(g() is None)
 
@@ -65,21 +65,21 @@ class ArgRefcountTests(unittest.TestCase):
             gg = []
             def worker():
                 # main and additional *finished* greenlets
-                ll = greenlet.getcurrent().ll = []
+                ll = greenstack.getcurrent().ll = []
                 def additional():
-                    ll.append(greenlet.getcurrent())
+                    ll.append(greenstack.getcurrent())
                 for i in range(2):
-                    greenlet.greenlet(additional).switch()
-                gg.append(weakref.ref(greenlet.getcurrent()))
+                    greenstack.greenlet(additional).switch()
+                gg.append(weakref.ref(greenstack.getcurrent()))
             for i in range(2):
                 t = threading.Thread(target=worker)
                 t.start()
                 t.join()
                 del t
-            greenlet.getcurrent() # update ts_current
+            greenstack.getcurrent() # update ts_current
             self.recycle_threads()
-            greenlet.getcurrent() # update ts_current
+            greenstack.getcurrent() # update ts_current
             gc.collect()
-            greenlet.getcurrent() # update ts_current
+            greenstack.getcurrent() # update ts_current
             for g in gg:
                 self.assertTrue(g() is None)

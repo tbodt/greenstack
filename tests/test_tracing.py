@@ -1,6 +1,6 @@
 import unittest
 import threading
-import greenlet
+import greenstack
 
 class SomeError(Exception):
     pass
@@ -9,7 +9,7 @@ class TracingTests(unittest.TestCase):
     if False:
     # if greenlet.GREENLET_USE_TRACING:
         def test_greenlet_tracing(self):
-            main = greenlet.getcurrent()
+            main = greenstack.getcurrent()
             actions = []
             def trace(*args):
                 actions.append(args)
@@ -17,14 +17,14 @@ class TracingTests(unittest.TestCase):
                 pass
             def dummyexc():
                 raise SomeError()
-            oldtrace = greenlet.settrace(trace)
+            oldtrace = greenstack.settrace(trace)
             try:
-                g1 = greenlet.greenlet(dummy)
+                g1 = greenstack.greenlet(dummy)
                 g1.switch()
-                g2 = greenlet.greenlet(dummyexc)
+                g2 = greenstack.greenlet(dummyexc)
                 self.assertRaises(SomeError, g2.switch)
             finally:
-                greenlet.settrace(oldtrace)
+                greenstack.settrace(oldtrace)
             self.assertEqual(actions, [
                 ('switch', (main, g1)),
                 ('switch', (g1, main)),
@@ -33,21 +33,21 @@ class TracingTests(unittest.TestCase):
             ])
 
         def test_exception_disables_tracing(self):
-            main = greenlet.getcurrent()
+            main = greenstack.getcurrent()
             actions = []
             def trace(*args):
                 actions.append(args)
                 raise SomeError()
             def dummy():
                 main.switch()
-            g = greenlet.greenlet(dummy)
+            g = greenstack.greenlet(dummy)
             g.switch()
-            oldtrace = greenlet.settrace(trace)
+            oldtrace = greenstack.settrace(trace)
             try:
                 self.assertRaises(SomeError, g.switch)
-                self.assertEqual(greenlet.gettrace(), None)
+                self.assertEqual(greenstack.gettrace(), None)
             finally:
-                greenlet.settrace(oldtrace)
+                greenstack.settrace(oldtrace)
             self.assertEqual(actions, [
                 ('switch', (main, g)),
             ])

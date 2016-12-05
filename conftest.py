@@ -14,5 +14,5 @@ def pytest_configure(config):
 
 
 def pytest_report_header(config):
-    import greenlet
-    return "greenlet %s from %s" % (greenlet.__version__, greenlet.__file__)
+    import greenstack
+    return "greenstack %s from %s" % (greenstack.__version__, greenstack.__file__)

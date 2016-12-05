@@ -2,7 +2,7 @@
  * broken during greenlet switches
  */
 
-#include "../greenlet.h"
+#include "../greenstack.h"
 
 struct exception_t
 {
@@ -26,12 +26,12 @@ static PyObject* test_exception_switch_recurse(int depth, int left)
 	}
 
 	PyObject* result = NULL;
-	PyGreenlet* self = PyGreenlet_GetCurrent();
+	PyStackGreenlet* self = PyStackGreenlet_GetCurrent();
 	if (self == NULL)
 		return NULL;
 
 	try {
-		PyGreenlet_Switch(self->parent, NULL, NULL);
+		PyStackGreenlet_Switch(self->parent, NULL, NULL);
 		p_test_exception_throw(depth);
 		PyErr_SetString(PyExc_RuntimeError, "throwing C++ exception didn't work");
 	} catch(exception_t& e) {
@@ -104,8 +104,8 @@ init_test_extension_cpp(void)
 		INITERROR;
 	}
 
-	PyGreenlet_Import();
-	if (_PyGreenlet_API == NULL) {
+	PyStackGreenlet_Import();
+	if (_PyStackGreenlet_API == NULL) {
 		INITERROR;
 	}
 

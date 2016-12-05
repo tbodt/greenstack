@@ -1,5 +1,5 @@
 import gc
-import greenlet
+import greenstack
 import weakref
 import unittest
 
@@ -7,7 +7,7 @@ import unittest
 class WeakRefTests(unittest.TestCase):
     def test_dead_weakref(self):
         def _dead_greenlet():
-            g = greenlet.greenlet(lambda: None)
+            g = greenstack.greenlet(lambda: None)
             g.switch()
             return g
         o = weakref.ref(_dead_greenlet())
@@ -15,7 +15,7 @@ class WeakRefTests(unittest.TestCase):
         self.assertEqual(o(), None)
 
     def test_inactive_weakref(self):
-        o = weakref.ref(greenlet.greenlet())
+        o = weakref.ref(greenstack.greenlet())
         gc.collect()
         self.assertEqual(o(), None)
 
@@ -23,12 +23,12 @@ class WeakRefTests(unittest.TestCase):
         seen = []
         def worker():
             try:
-                greenlet.getcurrent().parent.switch()
+                greenstack.getcurrent().parent.switch()
             finally:
                 seen.append(g())
-        g = greenlet.greenlet(worker)
+        g = greenstack.greenlet(worker)
         g.switch()
-        g2 = greenlet.greenlet(lambda: None, g)
+        g2 = greenstack.greenlet(lambda: None, g)
         g = weakref.ref(g2)
         g2 = None
         self.assertEqual(seen, [None])

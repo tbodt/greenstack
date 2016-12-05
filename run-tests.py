@@ -31,7 +31,7 @@ for o, a in opts:
     elif o == "-b":
         build_base = a
 
-# -- build greenlet
+# -- build greenstack
 if build:
     if verbosity == 0:
         cmd = [sys.executable, "setup.py", "-q", "build_ext", "-q", "-i"]
@@ -41,18 +41,18 @@ if build:
     spawn(cmd, search_path=0)
 
 
-# -- find greenlet but skip the one in "."
+# -- find greenstack but skip the one in "."
 if not build:
     oldpath = sys.path[:]
     sys.path.remove(here)
 
-import greenlet
+import greenstack
 
 if not build:
     sys.path[:] = oldpath
 
-sys.stdout.write("python %s (%s bit) using greenlet %s from %s\n" %
-                 (sys.version.split()[0], bits(), greenlet.__version__, greenlet.__file__))
+sys.stdout.write("python %s (%s bit) using greenstack %s from %s\n" %
+                 (sys.version.split()[0], bits(), greenstack.__version__, greenstack.__file__))
 sys.stdout.flush()
 
 

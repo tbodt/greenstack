@@ -34,21 +34,11 @@ def readfile(filename):
     finally:
         f.close()
 
-def _find_platform_headers():
-    return glob.glob("platform/switch_*.h")
-
 if hasattr(sys, "pypy_version_info"):
     ext_modules = []
     headers = []
 else:
     headers = ['greenlet.h']
-
-    if sys.platform == 'win32' and '64 bit' in sys.version:
-        # this works when building with msvc, not with 64 bit gcc
-        # switch_x64_masm.obj can be created with setup_switch_x64_masm.cmd
-        extra_objects = ['platform/switch_x64_masm.obj']
-    else:
-        extra_objects = []
 
     if sys.platform == 'win32' and os.environ.get('GREENLET_STATIC_RUNTIME') in ('1', 'yes'):
         extra_compile_args = ['/MT']
@@ -59,10 +49,9 @@ else:
 
     ext_modules = [Extension(
         name='greenlet',
-        sources=['greenlet.c'],
-        extra_objects=extra_objects,
+        sources=['greenlet.c', 'libcoro/coro.c'],
         extra_compile_args=extra_compile_args,
-        depends=['greenlet.h', 'slp_platformselect.h'] + _find_platform_headers())]
+        depends=['greenlet.h', 'libcoro/coro.h'])]
 
 from distutils.core import Command
 from my_build_ext import build_ext

@@ -286,7 +286,6 @@ static void g_switchstack(PyGreenlet *target)
 	current->recursion_depth = tstate->recursion_depth;
 	current->top_frame = tstate->frame;
 	tstate->frame = NULL;
-	/* printf("%p saving %p %p %p\n", current, tstate->exc_type, tstate->exc_value, tstate->exc_traceback); */
 	current->exc_type = tstate->exc_type;
 	tstate->exc_type = NULL;
 	current->exc_value = tstate->exc_value;
@@ -301,7 +300,6 @@ static void g_switchstack(PyGreenlet *target)
 	coro_transfer(&current->context, &target->context);
 
 	// restore state
-	/* printf("%p restoring %p %p %p\n", current, current->exc_type, current->exc_value, current->exc_traceback); */
 	tstate = PyThreadState_GET();
 	tstate->recursion_depth = current->recursion_depth;
 	tstate->frame = current->top_frame;
@@ -499,7 +497,6 @@ static void g_trampoline(struct trampoline_data *data) {
 	for (parent = self->parent; parent != NULL; parent = parent->parent) {
 		/* printf("switching to parent %p\n", parent); */
 		result = g_switch(parent, result, NULL);
-		printf("switch failed\n");
 		/* Return here means switch to parent failed,
 		 * in which case we throw *current* exception
 		 * to the next parent in chain.
@@ -550,8 +547,12 @@ static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
 	/* by the time we got here another start could happen elsewhere,
 	 * that means it should now be a regular switch
 	 */
-	// when does this ever happen?
-	assert(!PyGreenlet_STARTED(self));
+	if (PyGreenlet_STARTED(self)) {
+		Py_DECREF(run);
+		ts_passaround_args = args;
+		ts_passaround_kwargs = kwargs;
+		return 1;
+	}
 
 	/* start the greenlet */
 	/* default stack size is 256k * sizeof(void *) */

@@ -84,10 +84,6 @@
 #ifndef CORO_H
 #define CORO_H
 
-/* in lieu of config.h */
-#define HAVE_SETJMP_H
-#define HAVE_SIGALTSTACK
-
 #if __cplusplus
 extern "C" {
 #endif
@@ -308,6 +304,8 @@ void coro_stack_free (struct coro_stack *stack);
 # elif defined WINDOWS || defined _WIN32
 #  define CORO_LOSER 1 /* you don't win with windoze */
 # elif __linux && (__i386 || (__x86_64 && !__ILP32))
+#  define CORO_ASM 1
+# elif __APPLE__ && (__i386 || (__x86_64 && !__ILP32))
 #  define CORO_ASM 1
 # elif defined HAVE_UCONTEXT_H
 #  define CORO_UCONTEXT 1

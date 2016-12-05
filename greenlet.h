@@ -7,8 +7,9 @@
 
 #include <Python.h>
 
-// inform the 
+#ifdef GREENLET_MODULE
 #include "libcoro/coro.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,23 +19,22 @@ extern "C" {
 
 typedef struct _greenlet {
 	PyObject_HEAD
-	coro_context context;
-	struct coro_stack stack;
+	void *stack;
+	size_t stack_size;
 	struct _greenlet* parent;
 	PyObject* run_info;
 	struct _frame* top_frame;
-	int recursion_depth;
 	PyObject* weakreflist;
-	PyObject* exc_type;
-	PyObject* exc_value;
-	PyObject* exc_traceback;
 	PyObject* dict;
+#ifdef GREENLET_MODULE
+	coro_context context;
+#endif
 } PyGreenlet;
 
 #define PyGreenlet_Check(op)      PyObject_TypeCheck(op, &PyGreenlet_Type)
-#define PyGreenlet_MAIN(op)       (((PyGreenlet*)(op))->stack.sptr == (char *) 1)
-#define PyGreenlet_STARTED(op)    (((PyGreenlet*)(op))->stack.ssze != 0)
-#define PyGreenlet_ACTIVE(op)     (((PyGreenlet*)(op))->stack.sptr != NULL)
+#define PyGreenlet_MAIN(op)       (((PyGreenlet*)(op))->stack == (char *) 1)
+#define PyGreenlet_STARTED(op)    (((PyGreenlet*)(op))->stack_size != 0)
+#define PyGreenlet_ACTIVE(op)     (((PyGreenlet*)(op))->stack != NULL)
 #define PyGreenlet_GET_PARENT(op) (((PyGreenlet*)(op))->parent)
 
 #if (PY_MAJOR_VERSION == 2 && PY_MINOR_VERSION >= 7) || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 1) || PY_MAJOR_VERSION > 3

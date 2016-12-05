@@ -61,21 +61,6 @@ The running greenlet's stack_start is undefined but not NULL.
 
  ***********************************************************/
 
-/*** global state ***/
-
-/* In the presence of multithreading, this is a bit tricky:
-
-   - ts_current always store a reference to a greenlet, but it is
-     not really the current greenlet after a thread switch occurred.
-
-   - each *running* greenlet uses its run_info field to know which
-     thread it is attached to.  A greenlet can only run in the thread
-     where it was created.  This run_info is a ref to tstate->dict.
-
-   - the thread state dict is used to save and restore ts_current,
-     using the dictionary key 'ts_curkey'.
-*/
-
 /* Python <= 2.5 support */
 #if PY_MAJOR_VERSION < 3
 #ifndef Py_REFCNT
@@ -104,6 +89,21 @@ extern PyTypeObject PyGreenlet_Type;
 #ifndef GREENLET_USE_GC
 #define GREENLET_USE_GC 1
 #endif
+
+/*** global state ***/
+
+/* In the presence of multithreading, this is a bit tricky:
+
+   - ts_current always store a reference to a greenlet, but it is
+     not really the current greenlet after a thread switch occurred.
+
+   - each *running* greenlet uses its run_info field to know which
+     thread it is attached to.  A greenlet can only run in the thread
+     where it was created.  This run_info is a ref to tstate->dict.
+
+   - the thread state dict is used to save and restore ts_current,
+     using the dictionary key 'ts_curkey'.
+*/
 
 /* Strong reference to the switching from greenlet after the switch */
 static PyGreenlet* volatile ts_origin = NULL;
@@ -157,10 +157,8 @@ static PyGreenlet* green_create_main(void)
 	if (gmain == NULL)
 		return NULL;
 	coro_create(&gmain->context, NULL, NULL, NULL, 0);
-	gmain->stack.sptr = (char *) 1;
-	gmain->stack.ssze = (size_t) -1;
-	/* gmain->stack_start = (char*) 1; */
-	/* gmain->stack_stop = (char*) -1; */
+	gmain->stack = (void *) 1;
+	gmain->stack_size = (size_t) -1;
 	gmain->run_info = dict;
 	Py_INCREF(dict);
 	return gmain;
@@ -277,21 +275,14 @@ static void g_switchstack(PyGreenlet *target)
 	   calls into other Python code allowed (except very few that
 	   are safe), because global variables are very fragile.
 	*/
-	PyThreadState *tstate;
-	PyGreenlet *current;
-
 	// save state
-	tstate = PyThreadState_GET();
-	current = ts_current;
-	current->recursion_depth = tstate->recursion_depth;
+	PyThreadState *tstate = PyThreadState_GET();
+	PyGreenlet *current = ts_current;
+	int recursion_depth = tstate->recursion_depth;
 	current->top_frame = tstate->frame;
-	tstate->frame = NULL;
-	current->exc_type = tstate->exc_type;
-	tstate->exc_type = NULL;
-	current->exc_value = tstate->exc_value;
-	tstate->exc_value = NULL;
-	current->exc_traceback = tstate->exc_traceback;
-	tstate->exc_traceback = NULL;
+	PyObject *exc_type = tstate->exc_type;
+	PyObject *exc_value = tstate->exc_value;
+	PyObject *exc_traceback = tstate->exc_traceback;
 
 	ts_origin = current;
 	Py_INCREF(target);
@@ -301,15 +292,11 @@ static void g_switchstack(PyGreenlet *target)
 
 	// restore state
 	tstate = PyThreadState_GET();
-	tstate->recursion_depth = current->recursion_depth;
+	tstate->recursion_depth = recursion_depth;
 	tstate->frame = current->top_frame;
-	current->top_frame = NULL;
-	tstate->exc_type = current->exc_type;
-	current->exc_type = NULL;
-	tstate->exc_value = current->exc_value;
-	current->exc_value = NULL;
-	tstate->exc_traceback = current->exc_traceback;
-	current->exc_traceback = NULL;
+	tstate->exc_type = exc_type;
+	tstate->exc_value = exc_value;
+	tstate->exc_traceback = exc_traceback;
 }
 
 static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs);
@@ -340,18 +327,15 @@ g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
 
 	ts_passaround_args = args;
 	ts_passaround_kwargs = kwargs;
-	/* printf("==> g_switch from %p to %p\n", ts_current, target); */
 
 	// find the real target by ignoring dead greenlets, and if necessary
 	// starting a greenlet.
 	while (target) {
 		if (PyGreenlet_ACTIVE(target)) {
-			/* printf("g_switch choosing %p\n", target); */
 			g_switchstack(target);
 			break;
 		}
 		if (!PyGreenlet_STARTED(target)) {
-			/* printf("g_switch creating %p\n", target); */
 			err = g_create(target, args, kwargs);
 			if (err < 0) {
 				break;
@@ -378,8 +362,6 @@ g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
 		Py_DECREF(ts_origin);
 		ts_origin = NULL;
 	}
-
-	/* printf("<== g_switch from %p to %p\n", ts_current, target); */
 
 	/* We need to figure out what values to pass to the target greenlet
 	   based on the arguments that have been passed to greenlet.switch(). If
@@ -465,9 +447,12 @@ static void g_trampoline(struct trampoline_data *data) {
 	Py_DECREF(ts_origin);
 	ts_origin = NULL;
 
-	PyObject* result;
-	PyGreenlet* parent;
-	/* self->stack_start = (char*) 1;  /1* running *1/ */
+	// g_trampoline is responsible for setting up a nice clean slate
+	PyThreadState *tstate = PyThreadState_GET();
+	tstate->frame = NULL;
+	tstate->exc_type = NULL;
+	tstate->exc_value = NULL;
+	tstate->exc_traceback = NULL;
 
 	/* now use run_info to store the statedict */
 	PyObject *o = self->run_info;
@@ -475,6 +460,7 @@ static void g_trampoline(struct trampoline_data *data) {
 	Py_INCREF(self->run_info);
 	Py_XDECREF(o);
 
+	PyObject *result;
 	if (args == NULL) {
 		/* pending exception */
 		result = NULL;
@@ -489,13 +475,9 @@ static void g_trampoline(struct trampoline_data *data) {
 	result = g_handle_exit(result);
 
 	// jump back to parent
-	// can't just do this because we're on the stack
-	// coro_stack_free(&self->stack);
-	self->stack.sptr = NULL;
-	/* leave ssze where it is as an indication the greenlet was once alive */
-	/* self->stack_start = NULL;  /1* dead *1/ */
-	for (parent = self->parent; parent != NULL; parent = parent->parent) {
-		/* printf("switching to parent %p\n", parent); */
+	self->stack = NULL; // dead
+	// leave stack_size where it is as an indication the greenlet was once alive
+	for (PyGreenlet *parent = self->parent; parent != NULL; parent = parent->parent) {
 		result = g_switch(parent, result, NULL);
 		/* Return here means switch to parent failed,
 		 * in which case we throw *current* exception
@@ -524,7 +506,6 @@ static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
 		Py_XDECREF(tb);
 		return -1;
 	}
-	/* printf("%s\n", ((PyStringObject*)PyObject_Repr(run))->ob_sval); */
 	/* restore saved exception */
 	PyErr_Restore(exc, val, tb);
 
@@ -554,25 +535,22 @@ static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
 		return 1;
 	}
 
-	/* start the greenlet */
-	/* default stack size is 256k * sizeof(void *) */
-	if (!coro_stack_alloc(&self->stack, 0)) {
-		// handle error
-		// TODO think about exactly how to do this
+	// start the greenlet
+	// default stack size is 256k * sizeof(void *)
+	struct coro_stack stack;
+	if (!coro_stack_alloc(&stack, 0)) {
 		Py_DECREF(run);
 		return -1;
 	}
+	self->stack = stack.sptr;
+	self->stack_size = stack.ssze;
 	struct trampoline_data data;
 	data.self = self;
 	data.run = run;
 	data.args = args;
 	data.kwargs = kwargs;
-	coro_create(&self->context, (coro_func) g_trampoline, &data, self->stack.sptr, self->stack.ssze);
+	coro_create(&self->context, (coro_func) g_trampoline, &data, self->stack, self->stack_size);
 	self->top_frame = NULL;
-	self->exc_type = NULL;
-	self->exc_value = NULL;
-	self->exc_traceback = NULL;
-	self->recursion_depth = PyThreadState_GET()->recursion_depth;
 
 	return 0;
 }
@@ -673,9 +651,6 @@ green_traverse(PyGreenlet *self, visitproc visit, void *arg)
 	   - frames are not visited: alive greenlets are not garbage collected anyway */
 	Py_VISIT((PyObject*)self->parent);
 	Py_VISIT(self->run_info);
-	Py_VISIT(self->exc_type);
-	Py_VISIT(self->exc_value);
-	Py_VISIT(self->exc_traceback);
 	Py_VISIT(self->dict);
 	return 0;
 }
@@ -699,9 +674,6 @@ static int green_clear(PyGreenlet* self)
 	   so even if it switches we are relatively safe. */
 	Py_CLEAR(self->parent);
 	Py_CLEAR(self->run_info);
-	Py_CLEAR(self->exc_type);
-	Py_CLEAR(self->exc_value);
-	Py_CLEAR(self->exc_traceback);
 	Py_CLEAR(self->dict);
 	return 0;
 }
@@ -764,9 +736,6 @@ static void green_dealloc_safe(PyGreenlet* self)
 		PyObject_ClearWeakRefs((PyObject *) self);
 	Py_CLEAR(self->parent);
 	Py_CLEAR(self->run_info);
-	Py_CLEAR(self->exc_type);
-	Py_CLEAR(self->exc_value);
-	Py_CLEAR(self->exc_traceback);
 	Py_CLEAR(self->dict);
 	Py_TYPE(self)->tp_free((PyObject*) self);
 }

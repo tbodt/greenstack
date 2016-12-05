@@ -42,7 +42,6 @@
 
 #include <stddef.h>
 #include <string.h>
-#include <pthread.h> // Kappa
 
 /*****************************************************************************/
 /* ucontext/setjmp/asm backends                                              */
@@ -76,6 +75,9 @@
 #  include <stdio.h>
 #  include <signal.h>
 #  include <unistd.h>
+#  if _POSIX_THREADS
+#    include <pthread.h>
+#  endif
 # endif
 
 static coro_func coro_init_func;
@@ -290,8 +292,12 @@ coro_create (coro_context *ctx, coro_func coro, void *arg, void *sptr, size_t ss
     }
 
   trampoline_done = 0;
-  /* kill (getpid (), SIGUSR2); */
+#  if _POSIX_THREADS
+  /* kill delivers a signal to an arbitrary thread, but we need to signal this thread */
   pthread_kill(pthread_self(), SIGUSR2);
+#  else
+  kill (getpid (), SIGUSR2);
+#  endif
   sigfillset (&nsig); sigdelset (&nsig, SIGUSR2);
 
   while (!trampoline_done)

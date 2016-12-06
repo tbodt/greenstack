@@ -25,6 +25,8 @@ interpreter.
 
 Greenlets are coroutines for in-process concurrent programming.
 
+.. _`Stackless`: http://www.stackless.com
+
 Getting Greenstack
 ==================
 

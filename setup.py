@@ -56,6 +56,8 @@ setup(
     platforms=['any'],
     headers=headers,
     ext_modules=ext_modules,
+    setup_requires=['pytest-runner'],
+    tests_require=['pytest'],
     cmdclass=dict(build_ext=build_ext),
     classifiers=[
         'Intended Audience :: Developers',

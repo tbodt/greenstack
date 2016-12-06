@@ -8,6 +8,7 @@ include README.rst
 include appveyor.yml
 include appveyor/run_pip.py
 include appveyor/run_with_env.cmd
+include benchmarks/bounce.py
 include benchmarks/chain.py
 include conftest.py
 include dev-requirements.txt
@@ -16,8 +17,8 @@ include doc/conf.py
 include doc/greenlet.txt
 include doc/index.txt
 include doc/make.bat
-include greenlet.h
 include greenstack.c
+include greenstack.h
 include libcoro/coro.c
 include libcoro/coro.h
 include make-manylinux
@@ -35,7 +36,7 @@ include tests/test_extension_interface.py
 include tests/test_gc.py
 include tests/test_generator.py
 include tests/test_generator_nested.py
-include tests/test_greenstack.py
+include tests/test_greenlet.py
 include tests/test_leaks.py
 include tests/test_throw.py
 include tests/test_tracing.py

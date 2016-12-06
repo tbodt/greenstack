@@ -38,6 +38,10 @@ extern PyTypeObject PyStackGreenlet_Type;
 #define GREENSTACK_USE_GC 1
 #endif
 
+#ifndef GREENLET_USE_TRACING
+#define GREENLET_USE_TRACING 1
+#endif
+
 /*** global state ***/
 
 /* In the presence of multithreading, this is a bit tricky:
@@ -69,6 +73,11 @@ static PyObject* volatile ts_passaround_kwargs = NULL;
 
 static PyObject* ts_curkey;
 static PyObject* ts_delkey;
+#if GREENLET_USE_TRACING
+static PyObject* ts_tracekey;
+static PyObject* ts_event_switch;
+static PyObject* ts_event_throw;
+#endif
 static PyObject* PyExc_StackGreenletError;
 #define PyExc_GreenletError PyExc_StackGreenletError
 static PyObject* PyExc_StackGreenletExit;
@@ -244,6 +253,37 @@ static void g_switchstack(PyGreenlet *target)
 
 static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs);
 
+#if GREENLET_USE_TRACING
+static int
+g_calltrace(PyObject* tracefunc, PyObject* event, PyGreenlet* origin, PyGreenlet* target)
+{
+	PyObject *retval;
+	PyObject *exc_type, *exc_val, *exc_tb;
+	PyThreadState *tstate;
+	PyErr_Fetch(&exc_type, &exc_val, &exc_tb);
+	tstate = PyThreadState_GET();
+	tstate->tracing++;
+	tstate->use_tracing = 0;
+	retval = PyObject_CallFunction(tracefunc, "O(OO)", event, origin, target);
+	tstate->tracing--;
+	tstate->use_tracing = (tstate->tracing <= 0 &&
+	                       ((tstate->c_tracefunc != NULL) ||
+	                        (tstate->c_profilefunc != NULL)));
+	if (retval == NULL) {
+		/* In case of exceptions trace function is removed */
+		if (PyDict_GetItem(tstate->dict, ts_tracekey))
+			PyDict_DelItem(tstate->dict, ts_tracekey);
+		Py_XDECREF(exc_type);
+		Py_XDECREF(exc_val);
+		Py_XDECREF(exc_tb);
+		return -1;
+	} else
+		Py_DECREF(retval);
+	PyErr_Restore(exc_type, exc_val, exc_tb);
+	return 0;
+}
+#endif
+
 static PyObject *
 g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
 {
@@ -298,11 +338,30 @@ g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
 	ts_passaround_kwargs = NULL;
 	if (err < 0) {
 		/* Turn switch errors into switch throws */
+		assert(ts_origin == NULL);
 		Py_CLEAR(kwargs);
 		Py_CLEAR(args);
 	} else {
-		Py_DECREF(ts_origin);
+		PyGreenlet *origin;
+#if GREENLET_USE_TRACING
+		PyGreenlet *current;
+		PyObject *tracefunc;
+#endif
+		origin = ts_origin;
 		ts_origin = NULL;
+#if GREENLET_USE_TRACING
+		current = ts_current;
+		if ((tracefunc = PyDict_GetItem(current->run_info, ts_tracekey)) != NULL) {
+			Py_INCREF(tracefunc);
+			if (g_calltrace(tracefunc, args ? ts_event_switch : ts_event_throw, origin, current) < 0) {
+				/* Turn trace errors into switch throws */
+				Py_CLEAR(kwargs);
+				Py_CLEAR(args);
+			}
+			Py_DECREF(tracefunc);
+		}
+#endif
+		Py_DECREF(origin);
 	}
 
 	/* We need to figure out what values to pass to the target greenlet
@@ -390,6 +449,25 @@ static void g_trampoline(struct trampoline_data *data) {
 	PyObject *args = data->args;
 	PyObject *kwargs = data->kwargs;
 
+	/* now use run_info to store the statedict */
+	o = self->run_info;
+	self->run_info = green_statedict(self->parent);
+	Py_INCREF(self->run_info);
+	Py_XDECREF(o);
+
+#if GREENLET_USE_TRACING
+	PyObject *tracefunc;
+	if ((tracefunc = PyDict_GetItem(ts_current->run_info, ts_tracekey)) != NULL) {
+		Py_INCREF(tracefunc);
+		if (g_calltrace(tracefunc, args ? ts_event_switch : ts_event_throw, ts_origin, ts_current) < 0) {
+			/* Turn trace errors into switch throws */
+			Py_CLEAR(kwargs);
+			Py_CLEAR(args);
+		}
+		Py_DECREF(tracefunc);
+	}
+#endif
+
 	Py_DECREF(ts_origin);
 	ts_origin = NULL;
 
@@ -399,12 +477,6 @@ static void g_trampoline(struct trampoline_data *data) {
 	tstate->exc_type = NULL;
 	tstate->exc_value = NULL;
 	tstate->exc_traceback = NULL;
-
-	/* now use run_info to store the statedict */
-	o = self->run_info;
-	self->run_info = green_statedict(self->parent);
-	Py_INCREF(self->run_info);
-	Py_XDECREF(o);
 
 	if (args == NULL) {
 		/* pending exception */
@@ -1181,8 +1253,50 @@ static PyObject* mod_getcurrent(PyObject* self)
 	return (PyObject*) ts_current;
 }
 
+#if GREENLET_USE_TRACING
+static PyObject* mod_settrace(PyObject* self, PyObject* args)
+{
+	int err;
+	PyObject* previous;
+	PyObject* tracefunc;
+	PyGreenlet* current;
+	if (!PyArg_ParseTuple(args, "O", &tracefunc))
+		return NULL;
+	if (!STATE_OK)
+		return NULL;
+	current = ts_current;
+	previous = PyDict_GetItem(current->run_info, ts_tracekey);
+	if (previous == NULL)
+		previous = Py_None;
+	Py_INCREF(previous);
+	if (tracefunc == Py_None)
+		err = previous != Py_None ? PyDict_DelItem(current->run_info, ts_tracekey) : 0;
+	else
+		err = PyDict_SetItem(current->run_info, ts_tracekey, tracefunc);
+	if (err < 0)
+		Py_CLEAR(previous);
+	return previous;
+}
+
+static PyObject* mod_gettrace(PyObject* self)
+{
+	PyObject* tracefunc;
+	if (!STATE_OK)
+		return NULL;
+	tracefunc = PyDict_GetItem(ts_current->run_info, ts_tracekey);
+	if (tracefunc == NULL)
+		tracefunc = Py_None;
+	Py_INCREF(tracefunc);
+	return tracefunc;
+}
+#endif
+
 static PyMethodDef GreenMethods[] = {
 	{"getcurrent", (PyCFunction)mod_getcurrent, METH_NOARGS, /*XXX*/ NULL},
+#if GREENLET_USE_TRACING
+	{"settrace", (PyCFunction)mod_settrace, METH_VARARGS, NULL},
+	{"gettrace", (PyCFunction)mod_gettrace, METH_NOARGS, NULL},
+#endif
 	{NULL,     NULL}        /* Sentinel */
 };
 
@@ -1190,6 +1304,10 @@ static char* copy_on_greentype[] = {
 	"getcurrent",
 	"error",
 	"GreenletExit",
+#if GREENLET_USE_TRACING
+	"settrace",
+	"gettrace",
+#endif
 	NULL
 };
 
@@ -1236,9 +1354,19 @@ initgreenstack(void)
 #if PY_MAJOR_VERSION >= 3
 	ts_curkey = PyUnicode_InternFromString("__greenstack_ts_curkey");
 	ts_delkey = PyUnicode_InternFromString("__greenstack_ts_delkey");
+#if GREENLET_USE_TRACING
+	ts_tracekey = PyUnicode_InternFromString("__greenlet_ts_tracekey");
+	ts_event_switch = PyUnicode_InternFromString("switch");
+	ts_event_throw = PyUnicode_InternFromString("throw");
+#endif
 #else
 	ts_curkey = PyString_InternFromString("__greenstack_ts_curkey");
 	ts_delkey = PyString_InternFromString("__greenstack_ts_delkey");
+#if GREENLET_USE_TRACING
+	ts_tracekey = PyString_InternFromString("__greenlet_ts_tracekey");
+	ts_event_switch = PyString_InternFromString("switch");
+	ts_event_throw = PyString_InternFromString("throw");
+#endif
 #endif
 	if (ts_curkey == NULL || ts_delkey == NULL)
 	{
@@ -1290,6 +1418,7 @@ initgreenstack(void)
 	Py_INCREF(PyExc_StackGreenletExit);
 	PyModule_AddObject(m, "GreenletExit", PyExc_StackGreenletExit);
 	PyModule_AddObject(m, "GREENSTACK_USE_GC", PyBool_FromLong(GREENSTACK_USE_GC));
+	PyModule_AddObject(m, "GREENLET_USE_TRACING", PyBool_FromLong(GREENLET_USE_TRACING));
 
 	/* also publish module-level data as attributes of the greentype. */
 	for (p=copy_on_greentype; *p; p++) {

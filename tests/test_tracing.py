@@ -6,8 +6,7 @@ class SomeError(Exception):
     pass
 
 class TracingTests(unittest.TestCase):
-    if False:
-    # if greenlet.GREENLET_USE_TRACING:
+    if greenstack.GREENLET_USE_TRACING:
         def test_greenlet_tracing(self):
             main = greenstack.getcurrent()
             actions = []

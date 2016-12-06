@@ -213,23 +213,6 @@ static PyObject* green_statedict(PyGreenlet* g)
 
 static void g_switchstack(PyGreenlet *target)
 {
-	/* Perform a stack switch according to some global variables
-	   that must be set before:
-	   - ts_current: current greenlet (holds a reference)
-	   - ts_target: greenlet to switch to (weak reference)
-	   - ts_passaround_args: NULL if PyErr_Occurred(),
-	       else a tuple of args sent to ts_target (holds a reference)
-	   - ts_passaround_kwargs: switch kwargs (holds a reference)
-	   On return results are passed via global variables as well:
-	   - ts_origin: originating greenlet (holds a reference)
-	   - ts_current: current greenlet (holds a reference)
-	   - ts_passaround_args: NULL if PyErr_Occurred(),
-	       else a tuple of args sent to ts_current (holds a reference)
-	   - ts_passaround_kwargs: switch kwargs (holds a reference)
-	   It is very important that stack switch is 'atomic', i.e. no
-	   calls into other Python code allowed (except very few that
-	   are safe), because global variables are very fragile.
-	*/
 	// save state
 	PyThreadState *tstate = PyThreadState_GET();
 	PyGreenlet *current = ts_current;
@@ -292,11 +275,10 @@ g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
 		}
 		if (!PyGreenlet_STARTED(target)) {
 			err = g_create(target, args, kwargs);
-			if (err < 0) {
-				break;
+			if (err == 1) {
+				continue;
 			}
-			// go ahead and switch to it
-			continue;
+			break;
 		}
 		target = target->parent;
 	}
@@ -506,6 +488,8 @@ static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
 	data.kwargs = kwargs;
 	coro_create(&self->context, (coro_func) g_trampoline, &data, self->stack, self->stack_size);
 	self->top_frame = NULL;
+
+	g_switchstack(self);
 
 	return 0;
 }

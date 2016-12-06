@@ -1,32 +1,43 @@
-=====================================================
-greenlet: Lightweight concurrent programming
-=====================================================
+===============================================
+Greenstack: Cooperative green threads in Python
+===============================================
 .. toctree::
    :maxdepth: 2
 
-Motivation
-==========
+Introduction
+============
 
-The "greenlet" package is a spin-off of `Stackless`_, a version of CPython
-that supports micro-threads called "tasklets".  Tasklets run
-pseudo-concurrently (typically in a single or a few OS-level threads) and
-are synchronized with data exchanges on "channels".
+Greenstack is a fork of greenlet, which is a spin-off of `Stackless`_, a
+version of CPython that supports micro-threads called "tasklets".  Tasklets run
+pseudo-concurrently (typically in a single or a few OS-level threads) and are
+synchronized with data exchanges on "channels".
 
 A "greenlet", on the other hand, is a still more primitive notion of
-micro-thread with no implicit scheduling; coroutines, in other words.  
-This is useful when you want to
-control exactly when your code runs.  You can build custom scheduled
-micro-threads on top of greenlet; however, it seems that greenlets are
-useful on their own as a way to make advanced control flow structures.  
-For example, we can recreate generators; the difference with Python's own
-generators is that our generators can call nested functions and the nested
-functions can yield values too.  (Additionally, you don't need a "yield"
-keyword.  See the example in ``test/test_generator.py``). 
+micro-thread with no implicit scheduling; coroutines, in other words.  This is
+useful when you want to control exactly when your code runs.  You can build
+custom scheduled micro-threads on top of greenlet; however, it seems that
+greenlets are useful on their own as a way to make advanced control flow
+structures.  For example, we can recreate generators; the difference with
+Python's own generators is that our generators can call nested functions and
+the nested functions can yield values too.  (Additionally, you don't need a
+"yield" keyword.  See the example in ``test/test_generator.py``). 
 
-Greenlets are provided as a C extension module for the regular unmodified
-interpreter.
+Greenlets is a C extension module for the regular unmodified interpreter.
 
 .. _`Stackless`: http://www.stackless.com
+
+Differences from Greenlet
+-------------------------
+
+* In Greenlet, each greenlet shares the same stack, and
+  the stack for each greenlet is copied into the heap when the stack space is
+  needed for another greenlet. Greenstack allocates a separate stack for each
+  greenlet, and reuses stacks from greenlets that have exited for new
+  greenlets.
+
+* Greenlet implements stack switching using assembly language code. Greenstack
+  uses libcoro to do stack switching, which can use either assembler code,
+  setjmp/sigaltstack, ucontext, or fibers depending on the platform.
 
 Example
 -------
@@ -121,7 +132,7 @@ uncaught exception.
 
 For example::
 
-    from greenlet import greenlet
+    from greenstack import greenlet
 
     def test1():
         print 12
@@ -166,7 +177,7 @@ the "parent" defines which stack logically comes "below" the current one.
 Instantiation
 -------------
 
-``greenlet.greenlet`` is the greenlet type, which supports the following
+``greenstack.greenlet`` is the greenlet type, which supports the following
 operations:
 
 ``greenlet(run=None, parent=None)``
@@ -178,7 +189,7 @@ operations:
     Returns the current greenlet (i.e. the one which called this
     function).
 
-``greenlet.GreenletExit``
+``greenstack.GreenletExit``
     This special exception does not propagate to the parent greenlet; it
     can be used to kill a single greenlet.
 
@@ -217,16 +228,16 @@ switches to it.
 Here are the precise rules for sending objects around:
 
 ``g.switch(*args, **kwargs)``
-    Switches execution to the greenlet ``g``, sending it the given
-    arguments.  As a special case, if ``g`` did not start yet, then it
-    will start to run now.
+    Switches execution to the greenlet ``g``, sending it the given arguments.
+    As a special case, if ``g`` did not start yet, then it will start to run
+    now.
 
 Dying greenlet
-    If a greenlet's ``run()`` finishes, its return value is the object 
-    sent to its parent.  If ``run()`` terminates with an exception, the
-    exception is propagated to its parent (unless it is a
-    ``greenlet.GreenletExit`` exception, in which case the exception
-    object is caught and *returned* to the parent).
+    If a greenlet's ``run()`` finishes, its return value is the object sent to
+    its parent.  If ``run()`` terminates with an exception, the exception is
+    propagated to its parent (unless it is a ``greenstack.GreenletExit``
+    exception, in which case the exception object is caught and *returned* to
+    the parent).
 
 Apart from the cases described above, the target greenlet normally
 receives the object as the return value of the call to ``switch()`` in
@@ -269,7 +280,7 @@ Methods and attributes of greenlets
 ``g.throw([typ, [val, [tb]]])``
     Switches execution to the greenlet ``g``, but immediately raises the
     given exception in ``g``.  If no argument is provided, the exception
-    defaults to ``greenlet.GreenletExit``.  The normal exception
+    defaults to ``greenstack.GreenletExit``.  The normal exception
     propagation rules apply, as described above.  Note that calling this
     method is almost equivalent to the following::
 
@@ -321,10 +332,10 @@ It is difficult to detect greenlet switching reliably with conventional
 methods, so to improve support for debugging, tracing and profiling greenlet
 based code there are new functions in the greenlet module:
 
-``greenlet.gettrace()``
+``greenstack.gettrace()``
     Returns a previously set tracing function, or None.
 
-``greenlet.settrace(callback)``
+``greenstack.settrace(callback)``
     Sets a new tracing function and returns a previous tracing function, or
     None. The callback is called on various events and is expected to have
     the following signature::
@@ -354,68 +365,68 @@ C API Reference
 ===============
 
 Greenlets can be created and manipulated from extension modules written in C or
-C++, or from applications that embed Python. The ``greenlet.h`` header is
+C++, or from applications that embed Python. The ``greenstack.h`` header is
 provided, and exposes the entire API available to pure Python modules.
 
 Types
 -----
-+--------------------+-------------------+
-| Type name          | Python name       |
-+====================+===================+
-| PyGreenlet         | greenlet.greenlet |
-+--------------------+-------------------+
++--------------------+---------------------+
+| Type name          | Python name         |
++====================+=====================+
+| PyStackGreenlet    | greenstack.greenlet |
++--------------------+---------------------+
 
 Exceptions
 ----------
-+---------------------+-----------------------+
-| Type name           | Python name           |
-+=====================+=======================+
-| PyExc_GreenletError | greenlet.error        |
-+---------------------+-----------------------+
-| PyExc_GreenletExit  | greenlet.GreenletExit |
-+---------------------+-----------------------+
++--------------------------+-------------------------+
+| Type name                | Python name             |
++==========================+=========================+
+| PyExc_StackGreenletError | greenstack.error        |
++--------------------------+-------------------------+
+| PyExc_StackGreenletExit  | greenstack.GreenletExit |
++--------------------------+-------------------------+
 
 Reference
 ---------
 
-``PyGreenlet_Import()``
+``PyStackGreenlet_Import()``
     A macro that imports the greenlet module and initializes the C API. This
     must be called once for each extension module that uses the greenlet C API.
 
-``int PyGreenlet_Check(PyObject *p)``
-    Macro that returns true if the argument is a PyGreenlet.
+``int PyStackGreenlet_Check(PyObject *p)``
+    Macro that returns true if the argument is a PyStackGreenlet.
 
-``int PyGreenlet_STARTED(PyGreenlet *g)``
+``int PyStackGreenlet_STARTED(PyStackGreenlet *g)``
     Macro that returns true if the greenlet ``g`` has started.
 
-``int PyGreenlet_ACTIVE(PyGreenlet *g)``
+``int PyStackGreenlet_ACTIVE(PyStackGreenlet *g)``
     Macro that returns true if the greenlet ``g`` has started and has not died.
 
-``PyGreenlet *PyGreenlet_GET_PARENT(PyGreenlet *g)``
+``PyStackGreenlet *PyStackGreenlet_GET_PARENT(PyStackGreenlet *g)``
     Macro that returns the parent greenlet of ``g``.
 
-``int PyGreenlet_SetParent(PyGreenlet *g, PyGreenlet *nparent)``
+``int PyStackGreenlet_SetParent(PyStackGreenlet *g, PyStackGreenlet *nparent)``
     Set the parent greenlet of ``g``. Returns 0 for success. If -1 is returned,
-    then ``g`` is not a pointer to a PyGreenlet, and an AttributeError will
+    then ``g`` is not a pointer to a PyStackGreenlet, and an AttributeError will
     be raised.
 
-``PyGreenlet *PyGreenlet_GetCurrent(void)``
+``PyStackGreenlet *PyStackGreenlet_GetCurrent(void)``
     Returns the currently active greenlet object.
 
-``PyGreenlet *PyGreenlet_New(PyObject *run, PyObject *parent)``
+``PyStackGreenlet *PyStackGreenlet_New(PyObject *run, PyObject *parent)``
     Creates a new greenlet object with the callable ``run`` and parent
     ``parent``. Both parameters are optional. If ``run`` is NULL, then the
     greenlet will be created, but will fail if switched in. If ``parent`` is
     NULL, the parent is automatically set to the current greenlet.
 
-``PyObject *PyGreenlet_Switch(PyGreenlet *g, PyObject *args, PyObject *kwargs)``
+``PyObject *PyStackGreenlet_Switch(PyStackGreenlet *g, PyObject *args, PyObject *kwargs)``
     Switches to the greenlet ``g``. ``args`` and ``kwargs`` are optional and
     can be NULL. If ``args`` is NULL, an empty tuple is passed to the target
     greenlet. If kwargs is NULL, no keyword arguments are passed to the target
     greenlet. If arguments are specified, ``args`` should be a tuple and
     ``kwargs`` should be a dict.
 
-``PyObject *PyGreenlet_Throw(PyGreenlet *g, PyObject *typ, PyObject *val, PyObject *tb)``
+``PyObject *PyStackGreenlet_Throw(PyStackGreenlet *g, PyObject *typ, PyObject *val, PyObject *tb)``
     Switches to greenlet ``g``, but immediately raise an exception of type
     ``typ`` with the value ``val``, and optionally, the traceback object
     ``tb``. ``tb`` can be NULL.

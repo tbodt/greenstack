@@ -1,4 +1,8 @@
-The files in greenlet have been released under the following MIT license:
+The files in the libcoro subdirectory are subject to the license included in
+that directory.
+
+Unless otherwise noted, the files in greenlet have been released under the
+following MIT license:
 
 Copyright (c) Armin Rigo, Christian Tismer and contributors
 

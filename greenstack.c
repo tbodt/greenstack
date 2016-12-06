@@ -213,14 +213,19 @@ static PyObject* green_statedict(PyGreenlet* g)
 
 static void g_switchstack(PyGreenlet *target)
 {
-	// save state
-	PyThreadState *tstate = PyThreadState_GET();
-	PyGreenlet *current = ts_current;
-	int recursion_depth = tstate->recursion_depth;
+	PyThreadState *tstate;
+	PyGreenlet *current;
+	int recursion_depth;
+	PyObject *exc_type, *exc_value, *exc_traceback;
+
+	/* save state */
+	tstate = PyThreadState_GET();
+	current = ts_current;
+	recursion_depth = tstate->recursion_depth;
 	current->top_frame = tstate->frame;
-	PyObject *exc_type = tstate->exc_type;
-	PyObject *exc_value = tstate->exc_value;
-	PyObject *exc_traceback = tstate->exc_traceback;
+	exc_type = tstate->exc_type;
+	exc_value = tstate->exc_value;
+	exc_traceback = tstate->exc_traceback;
 
 	ts_origin = current;
 	Py_INCREF(target);
@@ -228,7 +233,7 @@ static void g_switchstack(PyGreenlet *target)
 
 	coro_transfer(&current->context, &target->context);
 
-	// restore state
+	/* restore state */
 	tstate = PyThreadState_GET();
 	tstate->recursion_depth = recursion_depth;
 	tstate->frame = current->top_frame;
@@ -266,8 +271,8 @@ g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
 	ts_passaround_args = args;
 	ts_passaround_kwargs = kwargs;
 
-	// find the real target by ignoring dead greenlets, and if necessary
-	// starting a greenlet.
+	/* find the real target by ignoring dead greenlets, and if necessary
+	 * starting a greenlet. */
 	while (target) {
 		if (PyGreenlet_ACTIVE(target)) {
 			g_switchstack(target);
@@ -376,6 +381,10 @@ struct trampoline_data {
 };
 
 static void g_trampoline(struct trampoline_data *data) {
+	PyThreadState *tstate;
+	PyObject *result, *o;
+	PyGreenlet *parent;
+
 	PyGreenlet *self = data->self;
 	PyObject *run = data->run;
 	PyObject *args = data->args;
@@ -384,20 +393,19 @@ static void g_trampoline(struct trampoline_data *data) {
 	Py_DECREF(ts_origin);
 	ts_origin = NULL;
 
-	// g_trampoline is responsible for setting up a nice clean slate
-	PyThreadState *tstate = PyThreadState_GET();
+	/* g_trampoline is responsible for setting up a nice clean slate */
+	tstate = PyThreadState_GET();
 	tstate->frame = NULL;
 	tstate->exc_type = NULL;
 	tstate->exc_value = NULL;
 	tstate->exc_traceback = NULL;
 
 	/* now use run_info to store the statedict */
-	PyObject *o = self->run_info;
+	o = self->run_info;
 	self->run_info = green_statedict(self->parent);
 	Py_INCREF(self->run_info);
 	Py_XDECREF(o);
 
-	PyObject *result;
 	if (args == NULL) {
 		/* pending exception */
 		result = NULL;
@@ -411,10 +419,10 @@ static void g_trampoline(struct trampoline_data *data) {
 	Py_DECREF(run);
 	result = g_handle_exit(result);
 
-	// jump back to parent
-	self->stack = NULL; // dead
-	// leave stack_size where it is as an indication the greenlet was once alive
-	for (PyGreenlet *parent = self->parent; parent != NULL; parent = parent->parent) {
+	/* jump back to parent */
+	self->stack = NULL; /* dead */
+	/* leave stack_size where it is as an indication the greenlet was once alive */
+	for (parent = self->parent; parent != NULL; parent = parent->parent) {
 		result = g_switch(parent, result, NULL);
 		/* Return here means switch to parent failed,
 		 * in which case we throw *current* exception
@@ -432,6 +440,9 @@ static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
 	PyObject *run;
 	PyObject *exc, *val, *tb;
 	PyObject *run_info;
+
+	struct coro_stack stack;
+	struct trampoline_data data;
 
 	/* save exception in case getattr clears it */
 	PyErr_Fetch(&exc, &val, &tb);
@@ -472,16 +483,14 @@ static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
 		return 1;
 	}
 
-	// start the greenlet
-	// default stack size is 256k * sizeof(void *)
-	struct coro_stack stack;
+	/* start the greenlet */
+	/* default stack size is 256k * sizeof(void *) */
 	if (!coro_stack_alloc(&stack, 0)) {
 		Py_DECREF(run);
 		return -1;
 	}
 	self->stack = stack.sptr;
 	self->stack_size = stack.ssze;
-	struct trampoline_data data;
 	data.self = self;
 	data.run = run;
 	data.args = args;

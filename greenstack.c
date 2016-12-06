@@ -5,7 +5,11 @@
 #include "greenstack.h"
 #include "structmember.h"
 
-/* explanation was here */
+/* 
+ * To reduce the cost of allocating and destroying stacks for greenlets,
+ * greenlet stacks are never destroyed. Instead they are saved in a stack (a
+ * stack of stacks, if you will) and reused for future greenlets. 
+ */
 
 /* Python <= 2.5 support */
 #if PY_MAJOR_VERSION < 3
@@ -84,6 +88,11 @@ static PyObject* PyExc_StackGreenletExit;
 #define PyExc_GreenletExit PyExc_StackGreenletExit
 static PyObject* ts_empty_tuple;
 static PyObject* ts_empty_dict;
+
+#define STACK_CACHE_SIZE 8192
+#define STACK_CACHE_FULL (stack_cache_top >= STACK_CACHE_SIZE)
+static struct coro_stack stack_cache[STACK_CACHE_SIZE];
+static int stack_cache_top;
 
 #define PyGreenlet_STARTED PyStackGreenlet_STARTED
 #define PyGreenlet_ACTIVE PyStackGreenlet_ACTIVE
@@ -473,6 +482,7 @@ static void g_trampoline(struct trampoline_data *data) {
 
 	/* g_trampoline is responsible for setting up a nice clean slate */
 	tstate = PyThreadState_GET();
+	tstate->recursion_depth = 0;
 	tstate->frame = NULL;
 	tstate->exc_type = NULL;
 	tstate->exc_value = NULL;
@@ -491,9 +501,17 @@ static void g_trampoline(struct trampoline_data *data) {
 	Py_DECREF(run);
 	result = g_handle_exit(result);
 
-	/* jump back to parent */
-	self->stack = NULL; /* dead */
+	/* free the stack */
+	if (STACK_CACHE_FULL) {
+		coro_stack_free(&stack_cache[stack_cache_top--]);
+	}
+	stack_cache[stack_cache_top].sptr = self->stack;
+	stack_cache[stack_cache_top].ssze = self->stack_size;
+	stack_cache_top++;
+	self->stack = NULL;
 	/* leave stack_size where it is as an indication the greenlet was once alive */
+
+	/* jump back to parent */
 	for (parent = self->parent; parent != NULL; parent = parent->parent) {
 		result = g_switch(parent, result, NULL);
 		/* Return here means switch to parent failed,
@@ -557,9 +575,13 @@ static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
 
 	/* start the greenlet */
 	/* default stack size is 256k * sizeof(void *) */
-	if (!coro_stack_alloc(&stack, 0)) {
-		Py_DECREF(run);
-		return -1;
+	if (stack_cache_top != 0) {
+		stack = stack_cache[--stack_cache_top];
+	} else {
+		if (!coro_stack_alloc(&stack, 0)) {
+			Py_DECREF(run);
+			return -1;
+		}
 	}
 	self->stack = stack.sptr;
 	self->stack_size = stack.ssze;

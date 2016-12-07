@@ -1,6 +1,6 @@
 /* vim:set noet ts=8 sw=8 : */
 
-/* Stack greenlet object interface */
+/* Stack greenstack object interface */
 
 #ifndef Py_GREENSTACK_H
 #define Py_GREENSTACK_H
@@ -32,109 +32,137 @@ typedef struct _greenstack {
 	 * which I don't want to make anyone do. */
 	coro_context context;
 #endif
-} PyStackGreenlet;
+} PyGreenstack;
 
-#define PyStackGreenlet_Check(op)      PyObject_TypeCheck(op, &PyStackGreenlet_Type)
-#define PyStackGreenlet_MAIN(op)       (((PyStackGreenlet*)(op))->stack == (char *) 1)
-#define PyStackGreenlet_STARTED(op)    (((PyStackGreenlet*)(op))->stack_size != 0)
-#define PyStackGreenlet_ACTIVE(op)     (((PyStackGreenlet*)(op))->stack != NULL)
-#define PyStackGreenlet_GET_PARENT(op) (((PyStackGreenlet*)(op))->parent)
+#define PyGreenstack_Check(op)      PyObject_TypeCheck(op, &PyGreenstack_Type)
+#define PyGreenstack_MAIN(op)       (((PyGreenstack*)(op))->stack == (char *) 1)
+#define PyGreenstack_STARTED(op)    (((PyGreenstack*)(op))->stack_size != 0)
+#define PyGreenstack_ACTIVE(op)     (((PyGreenstack*)(op))->stack != NULL)
+#define PyGreenstack_GET_PARENT(op) (((PyGreenstack*)(op))->parent)
 
 #if (PY_MAJOR_VERSION == 2 && PY_MINOR_VERSION >= 7) || (PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 1) || PY_MAJOR_VERSION > 3
 #define GREENSTACK_USE_PYCAPSULE
 #endif
 
+typedef void (*switchwrapperfunc)(void *);
+
+struct _switchwrapper {
+	switchwrapperfunc func;
+	struct _switchwrapper *next;
+};
+
+#define PyGreenstack_CALL_SWITCH(next_void) { \
+	struct _switchwrapper *next = (struct _switchwrapper *) next_void; \
+	next->func(next->next); \
+}
+
 /* C API functions */
 
 /* Total number of symbols that are exported */
-#define PyStackGreenlet_API_pointers  8
+#define PyGreenstack_API_pointers  10
 
-#define PyStackGreenlet_Type_NUM       0
-#define PyExc_StackGreenletError_NUM   1
-#define PyExc_StackGreenletExit_NUM    2
+#define PyGreenstack_Type_NUM       0
+#define PyExc_GreenstackError_NUM   1
+#define PyExc_GreenstackExit_NUM    2
 
-#define PyStackGreenlet_New_NUM        3
-#define PyStackGreenlet_GetCurrent_NUM 4
-#define PyStackGreenlet_Throw_NUM      5
-#define PyStackGreenlet_Switch_NUM     6
-#define PyStackGreenlet_SetParent_NUM  7
+#define PyGreenstack_New_NUM        3
+#define PyGreenstack_GetCurrent_NUM 4
+#define PyGreenstack_Throw_NUM      5
+#define PyGreenstack_Switch_NUM     6
+#define PyGreenstack_SetParent_NUM  7
+#define PyGreenstack_AddSwitchWrapper_NUM 8
+#define PyGreenstack_RemoveSwitchWrapper_NUM 9
 
 #ifndef GREENSTACK_MODULE
 /* This section is used by modules that uses the greenstack C API */
-static void **_PyStackGreenlet_API = NULL;
+static void **_PyGreenstack_API = NULL;
 
-#define PyStackGreenlet_Type (*(PyTypeObject *) _PyStackGreenlet_API[PyStackGreenlet_Type_NUM])
+#define PyGreenstack_Type (*(PyTypeObject *) _PyGreenstack_API[PyGreenstack_Type_NUM])
 
-#define PyExc_StackGreenletError \
-	((PyObject *) _PyStackGreenlet_API[PyExc_StackGreenletError_NUM])
+#define PyExc_GreenstackError \
+	((PyObject *) _PyGreenstack_API[PyExc_GreenstackError_NUM])
 
-#define PyExc_StackGreenletExit \
-	((PyObject *) _PyStackGreenlet_API[PyExc_StackGreenletExit_NUM])
+#define PyExc_GreenstackExit \
+	((PyObject *) _PyGreenstack_API[PyExc_GreenstackExit_NUM])
 
 /*
- * PyStackGreenlet_New(PyObject *args)
+ * PyGreenstack_New(PyObject *args)
  *
- * greenstack.greenlet(run, parent=None)
+ * greenstack.greenstack(run, parent=None)
  */
-#define PyStackGreenlet_New \
-	(* (PyStackGreenlet * (*)(PyObject *run, PyStackGreenlet *parent)) \
-	 _PyStackGreenlet_API[PyStackGreenlet_New_NUM])
+#define PyGreenstack_New \
+	(* (PyGreenstack * (*)(PyObject *run, PyGreenstack *parent)) \
+	 _PyGreenstack_API[PyGreenstack_New_NUM])
 
 /*
- * PyStackGreenlet_GetCurrent(void)
+ * PyGreenstack_GetCurrent(void)
  *
  * greenstack.getcurrent()
  */
-#define PyStackGreenlet_GetCurrent \
-	(* (PyStackGreenlet * (*)(void)) _PyStackGreenlet_API[PyStackGreenlet_GetCurrent_NUM])
+#define PyGreenstack_GetCurrent \
+	(* (PyGreenstack * (*)(void)) _PyGreenstack_API[PyGreenstack_GetCurrent_NUM])
 
 /*
- * PyStackGreenlet_Throw(
- *         PyStackGreenlet *greenlet,
+ * PyGreenstack_Throw(
+ *         PyGreenstack *greenstack,
  *         PyObject *typ,
  *         PyObject *val,
  *         PyObject *tb)
  *
  * g.throw(...)
  */
-#define PyStackGreenlet_Throw \
+#define PyGreenstack_Throw \
 	(* (PyObject * (*) \
-	    (PyStackGreenlet *self, PyObject *typ, PyObject *val, PyObject *tb)) \
-	 _PyStackGreenlet_API[PyStackGreenlet_Throw_NUM])
+	    (PyGreenstack *self, PyObject *typ, PyObject *val, PyObject *tb)) \
+	 _PyGreenstack_API[PyGreenstack_Throw_NUM])
 
 /*
- * PyStackGreenlet_Switch(PyStackGreenlet *greenlet, PyObject *args)
+ * PyGreenstack_Switch(PyGreenstack *greenstack, PyObject *args)
  *
  * g.switch(*args, **kwargs)
  */
-#define PyStackGreenlet_Switch \
-	(* (PyObject * (*)(PyStackGreenlet *greenlet, PyObject *args, PyObject *kwargs)) \
-	 _PyStackGreenlet_API[PyStackGreenlet_Switch_NUM])
+#define PyGreenstack_Switch \
+	(* (PyObject * (*)(PyGreenstack *greenstack, PyObject *args, PyObject *kwargs)) \
+	 _PyGreenstack_API[PyGreenstack_Switch_NUM])
 
 /*
- * PyStackGreenlet_SetParent(PyObject *greenlet, PyObject *new_parent)
+ * PyGreenstack_SetParent(PyObject *greenstack, PyObject *new_parent)
  *
  * g.parent = new_parent
  */
-#define PyStackGreenlet_SetParent \
-	(* (int (*)(PyStackGreenlet *greenlet, PyStackGreenlet *nparent)) \
-	 _PyStackGreenlet_API[PyStackGreenlet_SetParent_NUM])
+#define PyGreenstack_SetParent \
+	(* (int (*)(PyGreenstack *greenstack, PyGreenstack *nparent)) \
+	 _PyGreenstack_API[PyGreenstack_SetParent_NUM])
+
+/*
+ * PyGreenstack_AddSwitchWrapper(switchwrapperfunc wrapper)
+ */
+#define PyGreenstack_AddSwitchWrapper \
+	(* (int (*)(switchwrapperfunc wrapper)) \
+	_PyGreenstack_API[PyGreenstack_AddSwitchWrapper_NUM])
+
+/*
+ * PyGreenstack_RemoveSwitchWrapper(switchwrapperfunc wrapper)
+ */
+#define PyGreenstack_RemoveSwitchWrapper \
+	(* (int (*)(switchwrapperfunc wrapper)) \
+	_PyGreenstack_API[PyGreenstack_RemoveSwitchWrapper_NUM])
 
 /* Macro that imports greenstack and initializes C API */
 #ifdef GREENSTACK_USE_PYCAPSULE
-#define PyStackGreenlet_Import() \
+#define PyGreenstack_Import() \
 { \
-	_PyStackGreenlet_API = (void**)PyCapsule_Import("greenstack._C_API", 0); \
+	_PyGreenstack_API = (void**)PyCapsule_Import("greenstack._C_API", 0); \
 }
 #else
-#define PyStackGreenlet_Import() \
+#define PyGreenstack_Import() \
 { \
 	PyObject *module = PyImport_ImportModule("greenstack"); \
 	if (module != NULL) { \
 		PyObject *c_api_object = PyObject_GetAttrString( \
 			module, "_C_API"); \
 		if (c_api_object != NULL && PyCObject_Check(c_api_object)) { \
-			_PyStackGreenlet_API = \
+			_PyGreenstack_API = \
 				(void **) PyCObject_AsVoidPtr(c_api_object); \
 			Py_DECREF(c_api_object); \
 		} \

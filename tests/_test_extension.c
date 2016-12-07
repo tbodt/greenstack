@@ -11,21 +11,21 @@
 #define TEST_MODULE_NAME "_test_extension"
 
 static PyObject *
-test_switch(PyObject *self, PyObject *greenlet)
+test_switch(PyObject *self, PyObject *greenstack)
 {
 	PyObject *result = NULL;
 
-	if (greenlet == NULL || !PyStackGreenlet_Check(greenlet)) {
+	if (greenstack == NULL || !PyGreenstack_Check(greenstack)) {
 		PyErr_BadArgument();
 		return NULL;
 	}
 
-	result = PyStackGreenlet_Switch((PyStackGreenlet *) greenlet, NULL, NULL);
+	result = PyGreenstack_Switch((PyGreenstack *) greenstack, NULL, NULL);
 	if (result == NULL) {
 		if (!PyErr_Occurred()) {
 			PyErr_SetString(
 				PyExc_AssertionError,
-				"greenlet.switch() failed for some reason.");
+				"greenstack.switch() failed for some reason.");
 		}
 		return NULL;
 	}
@@ -36,22 +36,22 @@ test_switch(PyObject *self, PyObject *greenlet)
 static PyObject *
 test_switch_kwargs(PyObject *self, PyObject *args, PyObject *kwargs)
 {
-	PyStackGreenlet *g = NULL;
+	PyGreenstack *g = NULL;
 	PyObject *result = NULL;
 
-	PyArg_ParseTuple(args, "O!", &PyStackGreenlet_Type, &g);
+	PyArg_ParseTuple(args, "O!", &PyGreenstack_Type, &g);
 
-	if (g == NULL || !PyStackGreenlet_Check(g)) {
+	if (g == NULL || !PyGreenstack_Check(g)) {
 		PyErr_BadArgument();
 		return NULL;
 	}
 
-	result = PyStackGreenlet_Switch(g, NULL, kwargs);
+	result = PyGreenstack_Switch(g, NULL, kwargs);
 	if (result == NULL) {
 		if (!PyErr_Occurred()) {
 			PyErr_SetString(
 				PyExc_AssertionError,
-				"greenlet.switch() failed for some reason.");
+				"greenstack.switch() failed for some reason.");
 		}
 		return NULL;
 	}
@@ -62,11 +62,11 @@ test_switch_kwargs(PyObject *self, PyObject *args, PyObject *kwargs)
 static PyObject *
 test_getcurrent(PyObject *self)
 {
-	PyStackGreenlet *g = PyStackGreenlet_GetCurrent();
-	if (g == NULL || !PyStackGreenlet_Check(g) || !PyStackGreenlet_ACTIVE(g)) {
+	PyGreenstack *g = PyGreenstack_GetCurrent();
+	if (g == NULL || !PyGreenstack_Check(g) || !PyGreenstack_ACTIVE(g)) {
 		PyErr_SetString(
 			PyExc_AssertionError,
-			"getcurrent() returned an invalid greenlet");
+			"getcurrent() returned an invalid greenstack");
 		Py_XDECREF(g);
 		return NULL;
 	}
@@ -77,40 +77,40 @@ test_getcurrent(PyObject *self)
 static PyObject *
 test_setparent(PyObject *self, PyObject *arg)
 {
-	PyStackGreenlet *current;
-	PyStackGreenlet *greenlet = NULL;
+	PyGreenstack *current;
+	PyGreenstack *greenstack = NULL;
 
-	if (arg == NULL || !PyStackGreenlet_Check(arg))
+	if (arg == NULL || !PyGreenstack_Check(arg))
 	{
 		PyErr_BadArgument();
 		return NULL;
 	}
-	if ((current = PyStackGreenlet_GetCurrent()) == NULL) {
+	if ((current = PyGreenstack_GetCurrent()) == NULL) {
 		return NULL;
 	}
-	greenlet = (PyStackGreenlet *) arg;
-	if (PyStackGreenlet_SetParent(greenlet, current)) {
+	greenstack = (PyGreenstack *) arg;
+	if (PyGreenstack_SetParent(greenstack, current)) {
 		Py_DECREF(current);
 		return NULL;
 	}
 	Py_DECREF(current);
-	if (PyStackGreenlet_Switch(greenlet, NULL, NULL) == NULL) {
+	if (PyGreenstack_Switch(greenstack, NULL, NULL) == NULL) {
 		return NULL;
 	}
 	Py_RETURN_NONE;
 }
 
 static PyObject *
-test_new_greenlet(PyObject *self, PyObject *callable)
+test_new_greenstack(PyObject *self, PyObject *callable)
 {
 	PyObject *result = NULL;
-	PyStackGreenlet *greenlet = PyStackGreenlet_New(callable, NULL);
+	PyGreenstack *greenstack = PyGreenstack_New(callable, NULL);
 
-	if (!greenlet) {
+	if (!greenstack) {
 		return NULL;
 	}
 
-	result = PyStackGreenlet_Switch(greenlet, NULL, NULL);
+	result = PyGreenstack_Switch(greenstack, NULL, NULL);
 	if (result == NULL) {
 		return NULL;
 	}
@@ -120,48 +120,48 @@ test_new_greenlet(PyObject *self, PyObject *callable)
 }
 
 static PyObject *
-test_raise_dead_greenlet(PyObject *self)
+test_raise_dead_greenstack(PyObject *self)
 {
-	PyErr_SetString(PyExc_StackGreenletExit, "test GreenletExit exception.");
+	PyErr_SetString(PyExc_GreenstackExit, "test GreenstackExit exception.");
 	return NULL;
 }
 
 static PyObject *
-test_raise_greenlet_error(PyObject *self)
+test_raise_greenstack_error(PyObject *self)
 {
-	PyErr_SetString(PyExc_StackGreenletError, "test greenlet.error exception");
+	PyErr_SetString(PyExc_GreenstackError, "test greenstack.error exception");
 	return NULL;
 }
 
 static PyObject *
-test_throw(PyObject *self, PyStackGreenlet *g)
+test_throw(PyObject *self, PyGreenstack *g)
 {
 	const char msg[] = "take that sucka!";
 	PyObject *msg_obj = Py_BuildValue("s", msg);
-	PyStackGreenlet_Throw(g, PyExc_ValueError, msg_obj, NULL);
+	PyGreenstack_Throw(g, PyExc_ValueError, msg_obj, NULL);
 	Py_DECREF(msg_obj);
 	Py_RETURN_NONE;
 }
 
 static PyMethodDef test_methods[] = {
 	{"test_switch", (PyCFunction) test_switch, METH_O,
-	 "Switch to the provided greenlet sending provided arguments, and \n"
+	 "Switch to the provided greenstack sending provided arguments, and \n"
 	 "return the results."},
 	{"test_switch_kwargs", (PyCFunction) test_switch_kwargs,
 	 METH_VARARGS | METH_KEYWORDS,
-	 "Switch to the provided greenlet sending the provided keyword args."},
+	 "Switch to the provided greenstack sending the provided keyword args."},
 	{"test_getcurrent", (PyCFunction) test_getcurrent, METH_NOARGS,
-	 "Test PyStackGreenlet_GetCurrent()"},
+	 "Test PyGreenstack_GetCurrent()"},
 	{"test_setparent", (PyCFunction) test_setparent, METH_O,
-	 "Se the parent of the provided greenlet and switch to it."},
-	{"test_new_greenlet", (PyCFunction) test_new_greenlet, METH_O,
-	 "Test PyStackGreenlet_New()"},
-	{"test_raise_dead_greenlet", (PyCFunction) test_raise_dead_greenlet,
-	 METH_NOARGS, "Just raise greenlet.GreenletExit"},
-	{"test_raise_greenlet_error", (PyCFunction) test_raise_greenlet_error,
-	 METH_NOARGS, "Just raise greenlet.error"},
+	 "Se the parent of the provided greenstack and switch to it."},
+	{"test_new_greenstack", (PyCFunction) test_new_greenstack, METH_O,
+	 "Test PyGreenstack_New()"},
+	{"test_raise_dead_greenstack", (PyCFunction) test_raise_dead_greenstack,
+	 METH_NOARGS, "Just raise greenstack.GreenstackExit"},
+	{"test_raise_greenstack_error", (PyCFunction) test_raise_greenstack_error,
+	 METH_NOARGS, "Just raise greenstack.error"},
 	{"test_throw", (PyCFunction) test_throw, METH_O,
-	 "Throw a ValueError at the provided greenlet"},
+	 "Throw a ValueError at the provided greenstack"},
 	{NULL, NULL, 0, NULL}
 };
 
@@ -200,7 +200,7 @@ init_test_extension(void)
 		INITERROR;
 	}
 
-	PyStackGreenlet_Import();
+	PyGreenstack_Import();
 
 #if PY_MAJOR_VERSION >= 3
 	return module;

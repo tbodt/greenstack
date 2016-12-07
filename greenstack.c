@@ -6,9 +6,9 @@
 #include "structmember.h"
 
 /* 
- * To reduce the cost of allocating and destroying stacks for greenlets,
- * greenlet stacks are never destroyed. Instead they are saved in a stack (a
- * stack of stacks, if you will) and reused for future greenlets. 
+ * To reduce the cost of allocating and destroying stacks for greenstacks,
+ * greenstack stacks are never destroyed. Instead they are saved in a stack (a
+ * stack of stacks, if you will) and reused for future greenstacks. 
  */
 
 /* Python <= 2.5 support */
@@ -33,38 +33,36 @@
 typedef int Py_ssize_t;
 #endif
 
-#define PyGreenlet PyStackGreenlet
-#define PyGreenlet_Type PyStackGreenlet_Type
-extern PyTypeObject PyStackGreenlet_Type;
+extern PyTypeObject PyGreenstack_Type;
 
 /* Defines that customize greenstack module behaviour */
 #ifndef GREENSTACK_USE_GC
 #define GREENSTACK_USE_GC 1
 #endif
 
-#ifndef GREENLET_USE_TRACING
-#define GREENLET_USE_TRACING 1
+#ifndef GREENSTACK_USE_TRACING
+#define GREENSTACK_USE_TRACING 1
 #endif
 
 /*** global state ***/
 
 /* In the presence of multithreading, this is a bit tricky:
 
-   - ts_current always store a reference to a greenlet, but it is
-   not really the current greenlet after a thread switch occurred.
+   - ts_current always store a reference to a greenstack, but it is
+   not really the current greenstack after a thread switch occurred.
 
-   - each *running* greenlet uses its run_info field to know which
-   thread it is attached to.  A greenlet can only run in the thread
+   - each *running* greenstack uses its run_info field to know which
+   thread it is attached to.  A greenstack can only run in the thread
      where it was created.  This run_info is a ref to tstate->dict.
 
    - the thread state dict is used to save and restore ts_current,
      using the dictionary key 'ts_curkey'.
 */
 
-/* Strong reference to the switching from greenlet after the switch */
-static PyGreenlet* volatile ts_origin = NULL;
-/* Strong reference to the current greenlet in this thread state */
-static PyGreenlet* volatile ts_current = NULL;
+/* Strong reference to the switching from greenstack after the switch */
+static PyGreenstack* volatile ts_origin = NULL;
+/* Strong reference to the current greenstack in this thread state */
+static PyGreenstack* volatile ts_current = NULL;
 /* NULL if error, otherwise args tuple to pass around during coro switch */
 static PyObject* volatile ts_passaround_args = NULL;
 static PyObject* volatile ts_passaround_kwargs = NULL;
@@ -77,15 +75,13 @@ static PyObject* volatile ts_passaround_kwargs = NULL;
 
 static PyObject* ts_curkey;
 static PyObject* ts_delkey;
-#if GREENLET_USE_TRACING
+#if GREENSTACK_USE_TRACING
 static PyObject* ts_tracekey;
 static PyObject* ts_event_switch;
 static PyObject* ts_event_throw;
 #endif
-static PyObject* PyExc_StackGreenletError;
-#define PyExc_GreenletError PyExc_StackGreenletError
-static PyObject* PyExc_StackGreenletExit;
-#define PyExc_GreenletExit PyExc_StackGreenletExit
+static PyObject* PyExc_GreenstackError;
+static PyObject* PyExc_GreenstackExit;
 static PyObject* ts_empty_tuple;
 static PyObject* ts_empty_dict;
 
@@ -93,11 +89,6 @@ static PyObject* ts_empty_dict;
 #define STACK_CACHE_FULL (stack_cache_top >= STACK_CACHE_SIZE)
 static struct coro_stack stack_cache[STACK_CACHE_SIZE];
 static int stack_cache_top;
-
-#define PyGreenlet_STARTED PyStackGreenlet_STARTED
-#define PyGreenlet_ACTIVE PyStackGreenlet_ACTIVE
-#define PyGreenlet_MAIN PyStackGreenlet_MAIN
-#define PyGreenlet_Check PyStackGreenlet_Check
 
 #if GREENSTACK_USE_GC
 #define GREENSTACK_GC_FLAGS Py_TPFLAGS_HAVE_GC
@@ -115,9 +106,9 @@ static int stack_cache_top;
 #define GREENSTACK_tp_is_gc 0
 #endif /* !GREENSTACK_USE_GC */
 
-static PyGreenlet* green_create_main(void)
+static PyGreenstack* green_create_main(void)
 {
-	PyGreenlet* gmain;
+	PyGreenstack* gmain;
 	PyObject* dict = PyThreadState_GetDict();
 	if (dict == NULL) {
 		if (!PyErr_Occurred())
@@ -125,8 +116,8 @@ static PyGreenlet* green_create_main(void)
 		return NULL;
 	}
 
-	/* create the main greenlet for this thread */
-	gmain = (PyGreenlet*) PyType_GenericAlloc(&PyGreenlet_Type, 0);
+	/* create the main greenstack for this thread */
+	gmain = (PyGreenstack*) PyType_GenericAlloc(&PyGreenstack_Type, 0);
 	if (gmain == NULL)
 		return NULL;
 	coro_create(&gmain->context, NULL, NULL, NULL, 0);
@@ -141,8 +132,8 @@ static int green_updatecurrent(void)
 {
 	PyObject *exc, *val, *tb;
 	PyThreadState* tstate;
-	PyGreenlet* current;
-	PyGreenlet* previous;
+	PyGreenstack* current;
+	PyGreenstack* previous;
 	PyObject* deleteme;
 
 green_updatecurrent_restart:
@@ -152,7 +143,7 @@ green_updatecurrent_restart:
 	/* get ts_current from the active tstate */
 	tstate = PyThreadState_GET();
 	if (tstate->dict && (current =
-	    (PyGreenlet*) PyDict_GetItem(tstate->dict, ts_curkey))) {
+	    (PyGreenstack*) PyDict_GetItem(tstate->dict, ts_curkey))) {
 		/* found -- remove it, to avoid keeping a ref */
 		Py_INCREF(current);
 		PyDict_DelItem(tstate->dict, ts_curkey);
@@ -175,7 +166,7 @@ green_updatecurrent_retry:
 	previous = ts_current;
 	ts_current = current;
 
-	/* save ts_current as the current greenlet of its own thread */
+	/* save ts_current as the current greenstack of its own thread */
 	if (PyDict_SetItem(previous->run_info, ts_curkey, (PyObject*) previous)) {
 		Py_DECREF(previous);
 		Py_DECREF(current);
@@ -186,7 +177,7 @@ green_updatecurrent_retry:
 	}
 	Py_DECREF(previous);
 
-	/* green_dealloc() cannot delete greenlets from other threads, so
+	/* green_dealloc() cannot delete greenstacks from other threads, so
 	   it stores them in the thread dict; delete them now. */
 	deleteme = PyDict_GetItem(tstate->dict, ts_delkey);
 	if (deleteme != NULL) {
@@ -215,12 +206,12 @@ green_updatecurrent_retry:
 	return 0;
 }
 
-static PyObject* green_statedict(PyGreenlet* g)
+static PyObject* green_statedict(PyGreenstack* g)
 {
-	while (!PyGreenlet_STARTED(g)) {
+	while (!PyGreenstack_STARTED(g)) {
 		g = g->parent;
 		if (g == NULL) {
-			/* garbage collected greenlet in chain */
+			/* garbage collected greenstack in chain */
 			return NULL;
 		}
 	}
@@ -229,10 +220,10 @@ static PyObject* green_statedict(PyGreenlet* g)
 
 /***********************************************************/
 
-static void g_switchstack(PyGreenlet *target)
+static void g_switchstack(PyGreenstack *target)
 {
 	PyThreadState *tstate;
-	PyGreenlet *current;
+	PyGreenstack *current;
 	int recursion_depth;
 	PyObject *exc_type, *exc_value, *exc_traceback;
 
@@ -260,11 +251,11 @@ static void g_switchstack(PyGreenlet *target)
 	tstate->exc_traceback = exc_traceback;
 }
 
-static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs);
+static int g_create(PyGreenstack *self, PyObject *args, PyObject *kwargs);
 
-#if GREENLET_USE_TRACING
+#if GREENSTACK_USE_TRACING
 static int
-g_calltrace(PyObject* tracefunc, PyObject* event, PyGreenlet* origin, PyGreenlet* target)
+g_calltrace(PyObject* tracefunc, PyObject* event, PyGreenstack* origin, PyGreenstack* target)
 {
 	PyObject *retval;
 	PyObject *exc_type, *exc_val, *exc_tb;
@@ -294,7 +285,7 @@ g_calltrace(PyObject* tracefunc, PyObject* event, PyGreenlet* origin, PyGreenlet
 #endif
 
 static PyObject *
-g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
+g_switch(PyGreenstack* target, PyObject* args, PyObject* kwargs)
 {
 	/* _consumes_ a reference to the args tuple and kwargs dict,
 	   and return a new tuple reference */
@@ -311,23 +302,23 @@ g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
 	if (run_info == NULL || run_info != ts_current->run_info) {
 		Py_XDECREF(args);
 		Py_XDECREF(kwargs);
-		PyErr_SetString(PyExc_GreenletError, run_info
+		PyErr_SetString(PyExc_GreenstackError, run_info
 		                ? "cannot switch to a different thread"
-		                : "cannot switch to a garbage collected greenlet");
+		                : "cannot switch to a garbage collected greenstack");
 		return NULL;
 	}
 
 	ts_passaround_args = args;
 	ts_passaround_kwargs = kwargs;
 
-	/* find the real target by ignoring dead greenlets, and if necessary
-	 * starting a greenlet. */
+	/* find the real target by ignoring dead greenstacks, and if necessary
+	 * starting a greenstack. */
 	while (target) {
-		if (PyGreenlet_ACTIVE(target)) {
+		if (PyGreenstack_ACTIVE(target)) {
 			g_switchstack(target);
 			break;
 		}
-		if (!PyGreenlet_STARTED(target)) {
+		if (!PyGreenstack_STARTED(target)) {
 			err = g_create(target, args, kwargs);
 			if (err == 1) {
 				continue;
@@ -351,14 +342,14 @@ g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
 		Py_CLEAR(kwargs);
 		Py_CLEAR(args);
 	} else {
-		PyGreenlet *origin;
-#if GREENLET_USE_TRACING
-		PyGreenlet *current;
+		PyGreenstack *origin;
+#if GREENSTACK_USE_TRACING
+		PyGreenstack *current;
 		PyObject *tracefunc;
 #endif
 		origin = ts_origin;
 		ts_origin = NULL;
-#if GREENLET_USE_TRACING
+#if GREENSTACK_USE_TRACING
 		current = ts_current;
 		if ((tracefunc = PyDict_GetItem(current->run_info, ts_tracekey)) != NULL) {
 			Py_INCREF(tracefunc);
@@ -373,8 +364,8 @@ g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
 		Py_DECREF(origin);
 	}
 
-	/* We need to figure out what values to pass to the target greenlet
-	   based on the arguments that have been passed to greenlet.switch(). If
+	/* We need to figure out what values to pass to the target greenstack
+	   based on the arguments that have been passed to greenstack.switch(). If
 	   switch() was just passed an arg tuple, then we'll just return that.
 	   If only keyword arguments were passed, then we'll pass the keyword
 	   argument dict. Otherwise, we'll create a tuple of (args, kwargs) and
@@ -410,9 +401,9 @@ g_switch(PyGreenlet* target, PyObject* args, PyObject* kwargs)
 static PyObject *
 g_handle_exit(PyObject *result)
 {
-	if (result == NULL && PyErr_ExceptionMatches(PyExc_GreenletExit))
+	if (result == NULL && PyErr_ExceptionMatches(PyExc_GreenstackExit))
 	{
-		/* catch and ignore GreenletExit */
+		/* catch and ignore GreenstackExit */
 		PyObject *exc, *val, *tb;
 		PyErr_Fetch(&exc, &val, &tb);
 		if (val == NULL)
@@ -442,7 +433,7 @@ g_handle_exit(PyObject *result)
 }
 
 struct trampoline_data {
-	PyGreenlet *self;
+	PyGreenstack *self;
 	PyObject *args;
 	PyObject *run;
 	PyObject *kwargs;
@@ -451,9 +442,9 @@ struct trampoline_data {
 static void g_trampoline(struct trampoline_data *data) {
 	PyThreadState *tstate;
 	PyObject *result, *o;
-	PyGreenlet *parent;
+	PyGreenstack *parent;
 
-	PyGreenlet *self = data->self;
+	PyGreenstack *self = data->self;
 	PyObject *run = data->run;
 	PyObject *args = data->args;
 	PyObject *kwargs = data->kwargs;
@@ -464,7 +455,7 @@ static void g_trampoline(struct trampoline_data *data) {
 	Py_INCREF(self->run_info);
 	Py_XDECREF(o);
 
-#if GREENLET_USE_TRACING
+#if GREENSTACK_USE_TRACING
 	PyObject *tracefunc;
 	if ((tracefunc = PyDict_GetItem(ts_current->run_info, ts_tracekey)) != NULL) {
 		Py_INCREF(tracefunc);
@@ -509,7 +500,7 @@ static void g_trampoline(struct trampoline_data *data) {
 	stack_cache[stack_cache_top].ssze = self->stack_size;
 	stack_cache_top++;
 	self->stack = NULL;
-	/* leave stack_size where it is as an indication the greenlet was once alive */
+	/* leave stack_size where it is as an indication the greenstack was once alive */
 
 	/* jump back to parent */
 	for (parent = self->parent; parent != NULL; parent = parent->parent) {
@@ -525,7 +516,7 @@ static void g_trampoline(struct trampoline_data *data) {
 	Py_FatalError("greenstack cannot continue");
 }
 
-static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
+static int g_create(PyGreenstack *self, PyObject *args, PyObject *kwargs)
 {
 	PyObject *run;
 	PyObject *exc, *val, *tb;
@@ -536,7 +527,7 @@ static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
 
 	/* save exception in case getattr clears it */
 	PyErr_Fetch(&exc, &val, &tb);
-	/* self.run is the object to call in the new greenlet */
+	/* self.run is the object to call in the new greenstack */
 	run = PyObject_GetAttrString((PyObject*) self, "run");
 	if (run == NULL) {
 		Py_XDECREF(exc);
@@ -553,27 +544,27 @@ static int g_create(PyGreenlet *self, PyObject *args, PyObject *kwargs)
 		return -1;
 	}
 
-	/* recheck run_info in case greenlet reparented anywhere above */
+	/* recheck run_info in case greenstack reparented anywhere above */
 	run_info = green_statedict(self);
 	if (run_info == NULL || run_info != ts_current->run_info) {
 		Py_DECREF(run);
-		PyErr_SetString(PyExc_GreenletError, run_info
+		PyErr_SetString(PyExc_GreenstackError, run_info
 		                ? "cannot switch to a different thread"
-		                : "cannot switch to a garbage collected greenlet");
+		                : "cannot switch to a garbage collected greenstack");
 		return -1;
 	}
 
 	/* by the time we got here another start could happen elsewhere,
 	 * that means it should now be a regular switch
 	 */
-	if (PyGreenlet_STARTED(self)) {
+	if (PyGreenstack_STARTED(self)) {
 		Py_DECREF(run);
 		ts_passaround_args = args;
 		ts_passaround_kwargs = kwargs;
 		return 1;
 	}
 
-	/* start the greenlet */
+	/* start the greenstack */
 	/* default stack size is 256k * sizeof(void *) */
 	if (stack_cache_top != 0) {
 		stack = stack_cache[--stack_cache_top];
@@ -610,15 +601,15 @@ static PyObject* green_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 			return NULL;
 		}
 		Py_INCREF(ts_current);
-		((PyGreenlet*) o)->parent = ts_current;
+		((PyGreenstack*) o)->parent = ts_current;
 	}
 	return o;
 }
 
-static int green_setrun(PyGreenlet* self, PyObject* nrun, void* c);
-static int green_setparent(PyGreenlet* self, PyObject* nparent, void* c);
+static int green_setrun(PyGreenstack* self, PyObject* nrun, void* c);
+static int green_setparent(PyGreenstack* self, PyObject* nparent, void* c);
 
-static int green_init(PyGreenlet *self, PyObject *args, PyObject *kwargs)
+static int green_init(PyGreenstack *self, PyObject *args, PyObject *kwargs)
 {
 	PyObject *run = NULL;
 	PyObject* nparent = NULL;
@@ -636,25 +627,25 @@ static int green_init(PyGreenlet *self, PyObject *args, PyObject *kwargs)
 	return 0;
 }
 
-static int kill_greenlet(PyGreenlet* self)
+static int kill_greenstack(PyGreenstack* self)
 {
-	/* Cannot raise an exception to kill the greenlet if
+	/* Cannot raise an exception to kill the greenstack if
 	   it is not running in the same thread! */
 	if (self->run_info == PyThreadState_GET()->dict) {
-		/* The dying greenlet cannot be a parent of ts_current
+		/* The dying greenstack cannot be a parent of ts_current
 		   because the 'parent' field chain would hold a
 		   reference */
 		PyObject* result;
-		PyGreenlet* oldparent;
-		PyGreenlet* tmp;
+		PyGreenstack* oldparent;
+		PyGreenstack* tmp;
 		if (!STATE_OK) {
 			return -1;
 		}
 		oldparent = self->parent;
 		self->parent = ts_current;
 		Py_INCREF(self->parent);
-		/* Send the greenlet a GreenletExit exception. */
-		PyErr_SetNone(PyExc_GreenletExit);
+		/* Send the greenstack a GreenstackExit exception. */
+		PyErr_SetNone(PyExc_GreenstackExit);
 		result = g_switch(self, NULL, NULL);
 		tmp = self->parent;
 		self->parent = oldparent;
@@ -665,7 +656,7 @@ static int kill_greenlet(PyGreenlet* self)
 		return 0;
 	}
 	else {
-		/* Not the same thread! Temporarily save the greenlet
+		/* Not the same thread! Temporarily save the greenstack
 		   into its thread's ts_delkey list. */
 		PyObject* lst;
 		lst = PyDict_GetItem(self->run_info, ts_delkey);
@@ -685,32 +676,32 @@ static int kill_greenlet(PyGreenlet* self)
 
 #if GREENSTACK_USE_GC
 static int
-green_traverse(PyGreenlet *self, visitproc visit, void *arg)
+green_traverse(PyGreenstack *self, visitproc visit, void *arg)
 {
 	/* We must only visit referenced objects, i.e. only objects
-	   Py_INCREF'ed by this greenlet (directly or indirectly):
+	   Py_INCREF'ed by this greenstack (directly or indirectly):
 	   - stack_prev is not visited: holds previous stack pointer, but it's not referenced
-	   - frames are not visited: alive greenlets are not garbage collected anyway */
+	   - frames are not visited: alive greenstacks are not garbage collected anyway */
 	Py_VISIT((PyObject*)self->parent);
 	Py_VISIT(self->run_info);
 	Py_VISIT(self->dict);
 	return 0;
 }
 
-static int green_is_gc(PyGreenlet* self)
+static int green_is_gc(PyGreenstack* self)
 {
-	/* Main greenlet can be garbage collected since it can only
+	/* Main greenstack can be garbage collected since it can only
 	   become unreachable if the underlying thread exited.
-	   Active greenlet cannot be garbage collected, however. */
-	if (PyGreenlet_MAIN(self) || !PyGreenlet_ACTIVE(self))
+	   Active greenstack cannot be garbage collected, however. */
+	if (PyGreenstack_MAIN(self) || !PyGreenstack_ACTIVE(self))
 		return 1;
 	return 0;
 }
 
-static int green_clear(PyGreenlet* self)
+static int green_clear(PyGreenstack* self)
 {
-	/* Greenlet is only cleared if it is about to be collected.
-	   Since active greenlets are not garbage collectable, we can
+	/* Greenstack is only cleared if it is about to be collected.
+	   Since active greenstacks are not garbage collectable, we can
 	   be sure that, even if they are deallocated during clear,
 	   nothing they reference is in unreachable or finalizers,
 	   so even if it switches we are relatively safe. */
@@ -721,18 +712,18 @@ static int green_clear(PyGreenlet* self)
 }
 #endif
 
-static void green_dealloc_safe(PyGreenlet* self)
+static void green_dealloc_safe(PyGreenstack* self)
 {
 	PyObject *error_type, *error_value, *error_traceback;
 
-	if (PyGreenlet_ACTIVE(self) && self->run_info != NULL && !PyGreenlet_MAIN(self)) {
+	if (PyGreenstack_ACTIVE(self) && self->run_info != NULL && !PyGreenstack_MAIN(self)) {
 		/* Hacks hacks hacks copied from instance_dealloc() */
-		/* Temporarily resurrect the greenlet. */
+		/* Temporarily resurrect the greenstack. */
 		assert(Py_REFCNT(self) == 0);
 		Py_REFCNT(self) = 1;
 		/* Save the current exception, if any. */
 		PyErr_Fetch(&error_type, &error_value, &error_traceback);
-		if (kill_greenlet(self) < 0) {
+		if (kill_greenstack(self) < 0) {
 			PyErr_WriteUnraisable((PyObject*) self);
 			/* XXX what else should we do? */
 		}
@@ -740,13 +731,13 @@ static void green_dealloc_safe(PyGreenlet* self)
 		 * our internal reference, otherwise PyFile_WriteObject
 		 * causes recursion if using Py_INCREF/Py_DECREF
 		 */
-		if (Py_REFCNT(self) == 1 && PyGreenlet_ACTIVE(self)) {
+		if (Py_REFCNT(self) == 1 && PyGreenstack_ACTIVE(self)) {
 			/* Not resurrected, but still not dead!
 			   XXX what else should we do? we complain. */
 			PyObject* f = PySys_GetObject("stderr");
 			Py_INCREF(self); /* leak! */
 			if (f != NULL) {
-				PyFile_WriteString("GreenletExit did not kill ",
+				PyFile_WriteString("GreenstackExit did not kill ",
 				                   f);
 				PyFile_WriteObject((PyObject*) self, f, 0);
 				PyFile_WriteString("\n", f);
@@ -783,7 +774,7 @@ static void green_dealloc_safe(PyGreenlet* self)
 }
 
 #if GREENSTACK_USE_GC
-static void green_dealloc(PyGreenlet* self)
+static void green_dealloc(PyGreenstack* self)
 {
 	PyObject_GC_UnTrack((PyObject *)self);
 	if (PyObject_IS_GC((PyObject *)self)) {
@@ -813,14 +804,14 @@ static PyObject* single_result(PyObject* results)
 }
 
 static PyObject *
-throw_greenlet(PyGreenlet *self, PyObject *typ, PyObject *val, PyObject *tb)
+throw_greenstack(PyGreenstack *self, PyObject *typ, PyObject *val, PyObject *tb)
 {
 	/* Note: _consumes_ a reference to typ, val, tb */
 	PyObject *result = NULL;
 	PyErr_Restore(typ, val, tb);
-	if (PyGreenlet_STARTED(self) && !PyGreenlet_ACTIVE(self))
+	if (PyGreenstack_STARTED(self) && !PyGreenstack_ACTIVE(self))
 	{
-		/* dead greenlet: turn GreenletExit into a regular return */
+		/* dead greenstack: turn GreenstackExit into a regular return */
 		result = g_handle_exit(result);
 	}
 	return single_result(g_switch(self, result, NULL));
@@ -829,24 +820,24 @@ throw_greenlet(PyGreenlet *self, PyObject *typ, PyObject *val, PyObject *tb)
 PyDoc_STRVAR(green_switch_doc,
 "switch(*args, **kwargs)\n"
 "\n"
-"Switch execution to this greenlet.\n"
+"Switch execution to this greenstack.\n"
 "\n"
-"If this greenlet has never been run, then this greenlet\n"
+"If this greenstack has never been run, then this greenstack\n"
 "will be switched to using the body of self.run(*args, **kwargs).\n"
 "\n"
-"If the greenlet is active (has been run, but was switch()'ed\n"
-"out before leaving its run function), then this greenlet will\n"
+"If the greenstack is active (has been run, but was switch()'ed\n"
+"out before leaving its run function), then this greenstack will\n"
 "be resumed and the return value to its switch call will be\n"
 "None if no arguments are given, the given argument if one\n"
 "argument is given, or the args tuple and keyword args dict if\n"
 "multiple arguments are given.\n"
 "\n"
-"If the greenlet is dead, or is the current greenlet then this\n"
+"If the greenstack is dead, or is the current greenstack then this\n"
 "function will simply return the arguments using the same rules as\n"
 "above.\n");
 
 static PyObject* green_switch(
-	PyGreenlet* self,
+	PyGreenstack* self,
 	PyObject* args,
 	PyObject* kwargs)
 {
@@ -868,25 +859,25 @@ static PyObject* green_switch(
 #endif
 
 PyDoc_STRVAR(green_throw_doc,
-"Switches execution to the greenlet ``g``, but immediately raises the\n"
+"Switches execution to the greenstack ``g``, but immediately raises the\n"
 "given exception in ``g``.  If no argument is provided, the exception\n"
-"defaults to ``greenstack.GreenletExit``.  The normal exception\n"
+"defaults to ``greenstack.GreenstackExit``.  The normal exception\n"
 "propagation rules apply, as described above.  Note that calling this\n"
 "method is almost equivalent to the following::\n"
 "\n"
 "    def raiser():\n"
 "        raise typ, val, tb\n"
-"    g_raiser = greenlet(raiser, parent=g)\n"
+"    g_raiser = greenstack(raiser, parent=g)\n"
 "    g_raiser.switch()\n"
 "\n"
 "except that this trick does not work for the\n"
-"``greenstack.GreenletExit`` exception, which would not propagate\n"
+"``greenstack.GreenstackExit`` exception, which would not propagate\n"
 "from ``g_raiser`` to ``g``.\n");
 
 static PyObject *
-green_throw(PyGreenlet *self, PyObject *args)
+green_throw(PyGreenstack *self, PyObject *args)
 {
-	PyObject *typ = PyExc_GreenletExit;
+	PyObject *typ = PyExc_GreenstackExit;
 	PyObject *val = NULL;
 	PyObject *tb = NULL;
 
@@ -945,7 +936,7 @@ green_throw(PyGreenlet *self, PyObject *args)
 		goto failed_throw;
 	}
 
-	return throw_greenlet(self, typ, val, tb);
+	return throw_greenstack(self, typ, val, tb);
 
 failed_throw:
 	/* Didn't use our arguments, so restore their original refcounts */
@@ -955,12 +946,12 @@ failed_throw:
 	return NULL;
 }
 
-static int green_bool(PyGreenlet* self)
+static int green_bool(PyGreenstack* self)
 {
-	return PyGreenlet_ACTIVE(self);
+	return PyGreenstack_ACTIVE(self);
 }
 
-static PyObject* green_getdict(PyGreenlet* self, void* c)
+static PyObject* green_getdict(PyGreenstack* self, void* c)
 {
 	if (self->dict == NULL) {
 		self->dict = PyDict_New();
@@ -971,7 +962,7 @@ static PyObject* green_getdict(PyGreenlet* self, void* c)
 	return self->dict;
 }
 
-static int green_setdict(PyGreenlet* self, PyObject* val, void* c)
+static int green_setdict(PyGreenstack* self, PyObject* val, void* c)
 {
 	PyObject* tmp;
 
@@ -990,17 +981,17 @@ static int green_setdict(PyGreenlet* self, PyObject* val, void* c)
 	return 0;
 }
 
-static PyObject* green_getdead(PyGreenlet* self, void* c)
+static PyObject* green_getdead(PyGreenstack* self, void* c)
 {
-	if (PyGreenlet_ACTIVE(self) || !PyGreenlet_STARTED(self))
+	if (PyGreenstack_ACTIVE(self) || !PyGreenstack_STARTED(self))
 		Py_RETURN_FALSE;
 	else
 		Py_RETURN_TRUE;
 }
 
-static PyObject* green_getrun(PyGreenlet* self, void* c)
+static PyObject* green_getrun(PyGreenstack* self, void* c)
 {
-	if (PyGreenlet_STARTED(self) || self->run_info == NULL) {
+	if (PyGreenstack_STARTED(self) || self->run_info == NULL) {
 		PyErr_SetString(PyExc_AttributeError, "run");
 		return NULL;
 	}
@@ -1008,13 +999,13 @@ static PyObject* green_getrun(PyGreenlet* self, void* c)
 	return self->run_info;
 }
 
-static int green_setrun(PyGreenlet* self, PyObject* nrun, void* c)
+static int green_setrun(PyGreenstack* self, PyObject* nrun, void* c)
 {
 	PyObject* o;
-	if (PyGreenlet_STARTED(self)) {
+	if (PyGreenstack_STARTED(self)) {
 		PyErr_SetString(PyExc_AttributeError,
 		                "run cannot be set "
-		                "after the start of the greenlet");
+		                "after the start of the greenstack");
 		return -1;
 	}
 	o = self->run_info;
@@ -1024,55 +1015,55 @@ static int green_setrun(PyGreenlet* self, PyObject* nrun, void* c)
 	return 0;
 }
 
-static PyObject* green_getparent(PyGreenlet* self, void* c)
+static PyObject* green_getparent(PyGreenstack* self, void* c)
 {
 	PyObject* result = self->parent ? (PyObject*) self->parent : Py_None;
 	Py_INCREF(result);
 	return result;
 }
 
-static int green_setparent(PyGreenlet* self, PyObject* nparent, void* c)
+static int green_setparent(PyGreenstack* self, PyObject* nparent, void* c)
 {
-	PyGreenlet* p;
+	PyGreenstack* p;
 	PyObject* run_info = NULL;
 	if (nparent == NULL) {
 		PyErr_SetString(PyExc_AttributeError, "can't delete attribute");
 		return -1;
 	}
-	if (!PyGreenlet_Check(nparent)) {
-		PyErr_SetString(PyExc_TypeError, "parent must be a greenlet");
+	if (!PyGreenstack_Check(nparent)) {
+		PyErr_SetString(PyExc_TypeError, "parent must be a greenstack");
 		return -1;
 	}
-	for (p=(PyGreenlet*) nparent; p; p=p->parent) {
+	for (p=(PyGreenstack*) nparent; p; p=p->parent) {
 		if (p == self) {
 			PyErr_SetString(PyExc_ValueError, "cyclic parent chain");
 			return -1;
 		}
-		run_info = PyGreenlet_ACTIVE(p) ? p->run_info : NULL;
+		run_info = PyGreenstack_ACTIVE(p) ? p->run_info : NULL;
 	}
 	if (run_info == NULL) {
 		PyErr_SetString(PyExc_ValueError, "parent must not be garbage collected");
 		return -1;
 	}
-	if (PyGreenlet_STARTED(self) && self->run_info != run_info) {
+	if (PyGreenstack_STARTED(self) && self->run_info != run_info) {
 		PyErr_SetString(PyExc_ValueError, "parent cannot be on a different thread");
 		return -1;
 	}
 	p = self->parent;
-	self->parent = (PyGreenlet*) nparent;
+	self->parent = (PyGreenstack*) nparent;
 	Py_INCREF(nparent);
 	Py_XDECREF(p);
 	return 0;
 }
 
-static PyObject* green_getframe(PyGreenlet* self, void* c)
+static PyObject* green_getframe(PyGreenstack* self, void* c)
 {
 	PyObject* result = self->top_frame ? (PyObject*) self->top_frame : Py_None;
 	Py_INCREF(result);
 	return result;
 }
 
-static PyObject* green_getstate(PyGreenlet* self)
+static PyObject* green_getstate(PyGreenstack* self)
 {
 	PyErr_Format(PyExc_TypeError,
 	             "cannot serialize '%s' object",
@@ -1087,8 +1078,8 @@ static PyObject* green_getstate(PyGreenlet* self)
  * These are exported using the CObject API
  */
 
-static PyGreenlet *
-PyGreenlet_GetCurrent(void)
+static PyGreenstack *
+PyGreenstack_GetCurrent(void)
 {
 	if (!STATE_OK) {
 		return NULL;
@@ -1098,22 +1089,22 @@ PyGreenlet_GetCurrent(void)
 }
 
 static int
-PyGreenlet_SetParent(PyGreenlet *g, PyGreenlet *nparent)
+PyGreenstack_SetParent(PyGreenstack *g, PyGreenstack *nparent)
 {
-	if (!PyGreenlet_Check(g)) {
-		PyErr_SetString(PyExc_TypeError, "parent must be a greenlet");
+	if (!PyGreenstack_Check(g)) {
+		PyErr_SetString(PyExc_TypeError, "parent must be a greenstack");
 		return -1;
 	}
 
-	return green_setparent((PyGreenlet*) g, (PyObject *) nparent, NULL);
+	return green_setparent((PyGreenstack*) g, (PyObject *) nparent, NULL);
 }
 
-static PyGreenlet *
-PyGreenlet_New(PyObject *run, PyGreenlet *parent)
+static PyGreenstack *
+PyGreenstack_New(PyObject *run, PyGreenstack *parent)
 {
-	PyGreenlet* g = NULL;
+	PyGreenstack* g = NULL;
 
-	g = (PyGreenlet *) PyType_GenericAlloc(&PyGreenlet_Type, 0);
+	g = (PyGreenstack *) PyType_GenericAlloc(&PyGreenstack_Type, 0);
 	if (g == NULL) {
 		return NULL;
 	}
@@ -1124,12 +1115,12 @@ PyGreenlet_New(PyObject *run, PyGreenlet *parent)
 	}
 
 	if (parent != NULL) {
-		if (PyGreenlet_SetParent(g, parent)) {
+		if (PyGreenstack_SetParent(g, parent)) {
 			Py_DECREF(g);
 			return NULL;
 		}
 	} else {
-		if ((g->parent = PyGreenlet_GetCurrent()) == NULL) {
+		if ((g->parent = PyGreenstack_GetCurrent()) == NULL) {
 			Py_DECREF(g);
 			return NULL;
 		}
@@ -1139,11 +1130,11 @@ PyGreenlet_New(PyObject *run, PyGreenlet *parent)
 }
 
 static PyObject *
-PyGreenlet_Switch(PyGreenlet *g, PyObject *args, PyObject *kwargs)
+PyGreenstack_Switch(PyGreenstack *g, PyObject *args, PyObject *kwargs)
 {
-	PyGreenlet *self = (PyGreenlet *) g;
+	PyGreenstack *self = (PyGreenstack *) g;
 
-	if (!PyGreenlet_Check(self)) {
+	if (!PyGreenstack_Check(self)) {
 		PyErr_BadArgument();
 		return NULL;
 	}
@@ -1166,16 +1157,16 @@ PyGreenlet_Switch(PyGreenlet *g, PyObject *args, PyObject *kwargs)
 }
 
 static PyObject *
-PyGreenlet_Throw(PyGreenlet *self, PyObject *typ, PyObject *val, PyObject *tb)
+PyGreenstack_Throw(PyGreenstack *self, PyObject *typ, PyObject *val, PyObject *tb)
 {
-	if (!PyGreenlet_Check(self)) {
+	if (!PyGreenstack_Check(self)) {
 		PyErr_BadArgument();
 		return NULL;
 	}
 	Py_INCREF(typ);
 	Py_XINCREF(val);
 	Py_XINCREF(tb);
-	return throw_greenlet(self, typ, val, tb);
+	return throw_greenstack(self, typ, val, tb);
 }
 
 /** End C API ****************************************************************/
@@ -1219,10 +1210,10 @@ static PyNumberMethods green_as_number = {
 };
 
 
-PyTypeObject PyGreenlet_Type = {
+PyTypeObject PyGreenstack_Type = {
 	PyVarObject_HEAD_INIT(NULL, 0)
-	"greenstack.greenlet",                    /* tp_name */
-	sizeof(PyGreenlet),                     /* tp_basicsize */
+	"greenstack.greenstack",                    /* tp_name */
+	sizeof(PyGreenstack),                     /* tp_basicsize */
 	0,                                      /* tp_itemsize */
 	/* methods */
 	(destructor)green_dealloc,              /* tp_dealloc */
@@ -1241,15 +1232,15 @@ PyTypeObject PyGreenlet_Type = {
 	0,                                      /* tp_setattro */
 	0,                                      /* tp_as_buffer*/
 	Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | GREENSTACK_GC_FLAGS, /* tp_flags */
-	"greenlet(run=None, parent=None) -> greenlet\n\n"
-	"Creates a new greenlet object (without running it).\n\n"
+	"greenstack(run=None, parent=None) -> greenstack\n\n"
+	"Creates a new greenstack object (without running it).\n\n"
 	" - *run* -- The callable to invoke.\n"
-	" - *parent* -- The parent greenlet. The default is the current "
-	"greenlet.",                            /* tp_doc */
+	" - *parent* -- The parent greenstack. The default is the current "
+	"greenstack.",                            /* tp_doc */
 	(traverseproc)GREENSTACK_tp_traverse,     /* tp_traverse */
 	(inquiry)GREENSTACK_tp_clear,             /* tp_clear */
 	0,                                      /* tp_richcompare */
-	offsetof(PyGreenlet, weakreflist),      /* tp_weaklistoffset */
+	offsetof(PyGreenstack, weakreflist),      /* tp_weaklistoffset */
 	0,                                      /* tp_iter */
 	0,                                      /* tp_iternext */
 	green_methods,                          /* tp_methods */
@@ -1259,7 +1250,7 @@ PyTypeObject PyGreenlet_Type = {
 	0,                                      /* tp_dict */
 	0,                                      /* tp_descr_get */
 	0,                                      /* tp_descr_set */
-	offsetof(PyGreenlet, dict),             /* tp_dictoffset */
+	offsetof(PyGreenstack, dict),             /* tp_dictoffset */
 	(initproc)green_init,                   /* tp_init */
 	GREENSTACK_tp_alloc,                      /* tp_alloc */
 	green_new,                              /* tp_new */
@@ -1275,13 +1266,13 @@ static PyObject* mod_getcurrent(PyObject* self)
 	return (PyObject*) ts_current;
 }
 
-#if GREENLET_USE_TRACING
+#if GREENSTACK_USE_TRACING
 static PyObject* mod_settrace(PyObject* self, PyObject* args)
 {
 	int err;
 	PyObject* previous;
 	PyObject* tracefunc;
-	PyGreenlet* current;
+	PyGreenstack* current;
 	if (!PyArg_ParseTuple(args, "O", &tracefunc))
 		return NULL;
 	if (!STATE_OK)
@@ -1315,7 +1306,7 @@ static PyObject* mod_gettrace(PyObject* self)
 
 static PyMethodDef GreenMethods[] = {
 	{"getcurrent", (PyCFunction)mod_getcurrent, METH_NOARGS, /*XXX*/ NULL},
-#if GREENLET_USE_TRACING
+#if GREENSTACK_USE_TRACING
 	{"settrace", (PyCFunction)mod_settrace, METH_VARARGS, NULL},
 	{"gettrace", (PyCFunction)mod_gettrace, METH_NOARGS, NULL},
 #endif
@@ -1325,8 +1316,8 @@ static PyMethodDef GreenMethods[] = {
 static char* copy_on_greentype[] = {
 	"getcurrent",
 	"error",
-	"GreenletExit",
-#if GREENLET_USE_TRACING
+	"GreenstackExit",
+#if GREENSTACK_USE_TRACING
 	"settrace",
 	"gettrace",
 #endif
@@ -1356,7 +1347,7 @@ initgreenstack(void)
 	PyObject* m = NULL;
 	char** p = NULL;
 	PyObject *c_api_object;
-	static void *_PyGreenlet_API[PyStackGreenlet_API_pointers];
+	static void *_PyGreenstack_API[PyGreenstack_API_pointers];
 
 #if PY_MAJOR_VERSION >= 3
 	m = PyModule_Create(&greenstack_module_def);
@@ -1376,16 +1367,16 @@ initgreenstack(void)
 #if PY_MAJOR_VERSION >= 3
 	ts_curkey = PyUnicode_InternFromString("__greenstack_ts_curkey");
 	ts_delkey = PyUnicode_InternFromString("__greenstack_ts_delkey");
-#if GREENLET_USE_TRACING
-	ts_tracekey = PyUnicode_InternFromString("__greenlet_ts_tracekey");
+#if GREENSTACK_USE_TRACING
+	ts_tracekey = PyUnicode_InternFromString("__greenstack_ts_tracekey");
 	ts_event_switch = PyUnicode_InternFromString("switch");
 	ts_event_throw = PyUnicode_InternFromString("throw");
 #endif
 #else
 	ts_curkey = PyString_InternFromString("__greenstack_ts_curkey");
 	ts_delkey = PyString_InternFromString("__greenstack_ts_delkey");
-#if GREENLET_USE_TRACING
-	ts_tracekey = PyString_InternFromString("__greenlet_ts_tracekey");
+#if GREENSTACK_USE_TRACING
+	ts_tracekey = PyString_InternFromString("__greenstack_ts_tracekey");
 	ts_event_switch = PyString_InternFromString("switch");
 	ts_event_throw = PyString_InternFromString("throw");
 #endif
@@ -1394,23 +1385,23 @@ initgreenstack(void)
 	{
 		INITERROR;
 	}
-	if (PyType_Ready(&PyGreenlet_Type) < 0)
+	if (PyType_Ready(&PyGreenstack_Type) < 0)
 	{
 		INITERROR;
 	}
-	PyExc_GreenletError = PyErr_NewException("greenstack.error", NULL, NULL);
-	if (PyExc_GreenletError == NULL)
+	PyExc_GreenstackError = PyErr_NewException("greenstack.error", NULL, NULL);
+	if (PyExc_GreenstackError == NULL)
 	{
 		INITERROR;
 	}
 #if PY_MAJOR_VERSION >= 3 || (PY_MAJOR_VERSION == 2 && PY_MINOR_VERSION >= 5)
-	PyExc_StackGreenletExit = PyErr_NewException("greenstack.GreenletExit",
+	PyExc_GreenstackExit = PyErr_NewException("greenstack.GreenstackExit",
 	                                        PyExc_BaseException, NULL);
 #else
-	PyExc_StackGreenletExit = PyErr_NewException("greenstack.GreenletExit",
+	PyExc_GreenstackExit = PyErr_NewException("greenstack.GreenstackExit",
 	                                        NULL, NULL);
 #endif
-	if (PyExc_StackGreenletExit == NULL)
+	if (PyExc_GreenstackExit == NULL)
 	{
 		INITERROR;
 	}
@@ -1433,20 +1424,20 @@ initgreenstack(void)
 		INITERROR;
 	}
 
-	Py_INCREF(&PyGreenlet_Type);
-	PyModule_AddObject(m, "greenlet", (PyObject*) &PyGreenlet_Type);
-	Py_INCREF(PyExc_StackGreenletError);
-	PyModule_AddObject(m, "error", PyExc_StackGreenletError);
-	Py_INCREF(PyExc_StackGreenletExit);
-	PyModule_AddObject(m, "GreenletExit", PyExc_StackGreenletExit);
+	Py_INCREF(&PyGreenstack_Type);
+	PyModule_AddObject(m, "greenstack", (PyObject*) &PyGreenstack_Type);
+	Py_INCREF(PyExc_GreenstackError);
+	PyModule_AddObject(m, "error", PyExc_GreenstackError);
+	Py_INCREF(PyExc_GreenstackExit);
+	PyModule_AddObject(m, "GreenstackExit", PyExc_GreenstackExit);
 	PyModule_AddObject(m, "GREENSTACK_USE_GC", PyBool_FromLong(GREENSTACK_USE_GC));
-	PyModule_AddObject(m, "GREENLET_USE_TRACING", PyBool_FromLong(GREENLET_USE_TRACING));
+	PyModule_AddObject(m, "GREENSTACK_USE_TRACING", PyBool_FromLong(GREENSTACK_USE_TRACING));
 
 	/* also publish module-level data as attributes of the greentype. */
 	for (p=copy_on_greentype; *p; p++) {
 		PyObject* o = PyObject_GetAttrString(m, *p);
 		if (!o) continue;
-		PyDict_SetItemString(PyGreenlet_Type.tp_dict, *p, o);
+		PyDict_SetItemString(PyGreenstack_Type.tp_dict, *p, o);
 		Py_DECREF(o);
 	}
 
@@ -1455,25 +1446,25 @@ initgreenstack(void)
 	 */
 
 	/* types */
-	_PyGreenlet_API[PyStackGreenlet_Type_NUM] = (void *) &PyGreenlet_Type;
+	_PyGreenstack_API[PyGreenstack_Type_NUM] = (void *) &PyGreenstack_Type;
 
 	/* exceptions */
-	_PyGreenlet_API[PyExc_StackGreenletError_NUM] = (void *) PyExc_StackGreenletError;
-	_PyGreenlet_API[PyExc_StackGreenletExit_NUM] = (void *) PyExc_StackGreenletExit;
+	_PyGreenstack_API[PyExc_GreenstackError_NUM] = (void *) PyExc_GreenstackError;
+	_PyGreenstack_API[PyExc_GreenstackExit_NUM] = (void *) PyExc_GreenstackExit;
 
 	/* methods */
-	_PyGreenlet_API[PyStackGreenlet_New_NUM] = (void *) PyGreenlet_New;
-	_PyGreenlet_API[PyStackGreenlet_GetCurrent_NUM] =
-		(void *) PyGreenlet_GetCurrent;
-	_PyGreenlet_API[PyStackGreenlet_Throw_NUM] = (void *) PyGreenlet_Throw;
-	_PyGreenlet_API[PyStackGreenlet_Switch_NUM] = (void *) PyGreenlet_Switch;
-	_PyGreenlet_API[PyStackGreenlet_SetParent_NUM] =
-		(void *) PyGreenlet_SetParent;
+	_PyGreenstack_API[PyGreenstack_New_NUM] = (void *) PyGreenstack_New;
+	_PyGreenstack_API[PyGreenstack_GetCurrent_NUM] =
+		(void *) PyGreenstack_GetCurrent;
+	_PyGreenstack_API[PyGreenstack_Throw_NUM] = (void *) PyGreenstack_Throw;
+	_PyGreenstack_API[PyGreenstack_Switch_NUM] = (void *) PyGreenstack_Switch;
+	_PyGreenstack_API[PyGreenstack_SetParent_NUM] =
+		(void *) PyGreenstack_SetParent;
 
 #ifdef GREENSTACK_USE_PYCAPSULE
-	c_api_object = PyCapsule_New((void *) _PyGreenlet_API, "greenstack._C_API", NULL);
+	c_api_object = PyCapsule_New((void *) _PyGreenstack_API, "greenstack._C_API", NULL);
 #else
-	c_api_object = PyCObject_FromVoidPtr((void *) _PyGreenlet_API, NULL);
+	c_api_object = PyCObject_FromVoidPtr((void *) _PyGreenstack_API, NULL);
 #endif
 	if (c_api_object != NULL)
 	{

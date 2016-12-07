@@ -1,7 +1,7 @@
-from greenstack import greenlet
+from greenstack import greenstack
 
 
-class genlet(greenlet):
+class genlet(greenstack):
 
     def __init__(self, *args, **kwds):
         self.args = args
@@ -28,7 +28,7 @@ class genlet(greenlet):
 
             result = child.switch()
         else:
-            self.parent = greenlet.getcurrent()
+            self.parent = greenstack.getcurrent()
             result = self.switch()
 
         if self:
@@ -41,7 +41,7 @@ class genlet(greenlet):
 
 
 def Yield(value, level=1):
-    g = greenlet.getcurrent()
+    g = greenstack.getcurrent()
 
     while level != 0:
         if not isinstance(g, genlet):

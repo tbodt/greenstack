@@ -5,8 +5,8 @@ import pytest
 class SomeError(Exception):
     pass
 
-if greenstack.GREENLET_USE_TRACING:
-    def test_greenlet_tracing():
+if greenstack.GREENSTACK_USE_TRACING:
+    def test_greenstack_tracing():
         main = greenstack.getcurrent()
         actions = []
         def trace(*args):
@@ -17,9 +17,9 @@ if greenstack.GREENLET_USE_TRACING:
             raise SomeError()
         oldtrace = greenstack.settrace(trace)
         try:
-            g1 = greenstack.greenlet(dummy)
+            g1 = greenstack.greenstack(dummy)
             g1.switch()
-            g2 = greenstack.greenlet(dummyexc)
+            g2 = greenstack.greenstack(dummyexc)
             with pytest.raises(SomeError):
                 g2.switch()
         finally:
@@ -39,7 +39,7 @@ if greenstack.GREENLET_USE_TRACING:
             raise SomeError()
         def dummy():
             main.switch()
-        g = greenstack.greenlet(dummy)
+        g = greenstack.greenstack(dummy)
         g.switch()
         oldtrace = greenstack.settrace(trace)
         try:

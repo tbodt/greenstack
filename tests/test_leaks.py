@@ -10,7 +10,7 @@ import threading
 def test_arg_refs():
     args = ('a', 'b', 'c')
     refcount_before = sys.getrefcount(args)
-    g = greenstack.greenlet(
+    g = greenstack.greenstack(
         lambda *args: greenstack.getcurrent().parent.switch(*args))
     for i in range(100):
         g.switch(*args)
@@ -18,14 +18,14 @@ def test_arg_refs():
 
 def test_kwarg_refs():
     kwargs = {}
-    g = greenstack.greenlet(
+    g = greenstack.greenstack(
         lambda **kwargs: greenstack.getcurrent().parent.switch(**kwargs))
     for i in range(100):
         g.switch(**kwargs)
     assert sys.getrefcount(kwargs) == 2
 
 if greenstack.GREENSTACK_USE_GC:
-    # These only work with greenlet gc support
+    # These only work with greenstack gc support
 
     def recycle_threads():
         # By introducing a thread that does sleep we allow other threads,
@@ -44,7 +44,7 @@ if greenstack.GREENSTACK_USE_GC:
     def test_threaded_leak():
         gg = []
         def worker():
-            # only main greenlet present
+            # only main greenstack present
             gg.append(weakref.ref(greenstack.getcurrent()))
         for i in range(2):
             t = threading.Thread(target=worker)
@@ -62,12 +62,12 @@ if greenstack.GREENSTACK_USE_GC:
     def test_threaded_adv_leak():
         gg = []
         def worker():
-            # main and additional *finished* greenlets
+            # main and additional *finished* greenstacks
             ll = greenstack.getcurrent().ll = []
             def additional():
                 ll.append(greenstack.getcurrent())
             for i in range(2):
-                greenstack.greenlet(additional).switch()
+                greenstack.greenstack(additional).switch()
             gg.append(weakref.ref(greenstack.getcurrent()))
         for i in range(2):
             t = threading.Thread(target=worker)

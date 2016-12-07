@@ -3,7 +3,7 @@ import sys
 import time
 import threading
 
-from greenstack import greenlet
+from greenstack import greenstack
 import pytest
 
 try:
@@ -19,7 +19,7 @@ class SomeError(Exception):
 
 def fmain(seen):
     try:
-        greenlet.getcurrent().parent.switch()
+        greenstack.getcurrent().parent.switch()
     except:
         seen.append(sys.exc_info()[0])
         raise
@@ -31,7 +31,7 @@ def send_exception(g, exc):
     # the purpose of this test is to explicitely check the propagation rules.
     def crasher(exc):
         raise exc
-    g1 = greenlet(crasher, parent=g)
+    g1 = greenstack(crasher, parent=g)
     g1.switch(exc)
 
 
@@ -40,9 +40,9 @@ def test_simple():
 
     def f():
         lst.append(1)
-        greenlet.getcurrent().parent.switch()
+        greenstack.getcurrent().parent.switch()
         lst.append(3)
-    g = greenlet(f)
+    g = greenstack(f)
     lst.append(0)
     g.switch()
     lst.append(2)
@@ -51,20 +51,20 @@ def test_simple():
     assert lst == list(range(5))
 
 def test_parent_equals_None():
-    g = greenlet(parent=None)
+    g = greenstack(parent=None)
 
 def test_run_equals_None():
-    g = greenlet(run=None)
+    g = greenstack(run=None)
 
 def test_two_children():
     lst = []
 
     def f():
         lst.append(1)
-        greenlet.getcurrent().parent.switch()
+        greenstack.getcurrent().parent.switch()
         lst.extend([1, 1])
-    g = greenlet(f)
-    h = greenlet(f)
+    g = greenstack(f)
+    h = greenstack(f)
     g.switch()
     assert len(lst) == 1
     h.switch()
@@ -81,14 +81,14 @@ def test_two_recursive_children():
 
     def f():
         lst.append(1)
-        greenlet.getcurrent().parent.switch()
+        greenstack.getcurrent().parent.switch()
 
     def g():
         lst.append(1)
-        g = greenlet(f)
+        g = greenstack(f)
         g.switch()
         lst.append(1)
-    g = greenlet(g)
+    g = greenstack(g)
     g.switch()
     assert len(lst) == 3
     assert sys.getrefcount(g) == 2
@@ -108,8 +108,8 @@ def test_threads():
 
 def test_exception():
     seen = []
-    g1 = greenlet(fmain)
-    g2 = greenlet(fmain)
+    g1 = greenstack(fmain)
+    g2 = greenstack(fmain)
     g1.switch(seen)
     g2.switch(seen)
     g2.parent = g1
@@ -122,7 +122,7 @@ def test_exception():
 
 def test_send_exception():
     seen = []
-    g1 = greenlet(fmain)
+    g1 = greenstack(fmain)
     g1.switch(seen)
     with pytest.raises(KeyError):
         send_exception(g1, KeyError)
@@ -130,17 +130,17 @@ def test_send_exception():
 
 def test_dealloc():
     seen = []
-    g1 = greenlet(fmain)
-    g2 = greenlet(fmain)
+    g1 = greenstack(fmain)
+    g2 = greenstack(fmain)
     g1.switch(seen)
     g2.switch(seen)
     assert seen == []
     del g1
     gc.collect()
-    assert seen == [greenlet.GreenletExit]
+    assert seen == [greenstack.GreenstackExit]
     del g2
     gc.collect()
-    assert seen == [greenlet.GreenletExit, greenlet.GreenletExit]
+    assert seen == [greenstack.GreenstackExit, greenstack.GreenstackExit]
 
 def test_dealloc_other_thread():
     seen = []
@@ -151,14 +151,14 @@ def test_dealloc_other_thread():
     lock2.acquire()
 
     def f():
-        g1 = greenlet(fmain)
+        g1 = greenstack(fmain)
         g1.switch(seen)
         someref.append(g1)
         del g1
         gc.collect()
         lock.release()
         lock2.acquire()
-        greenlet()   # trigger release
+        greenstack()   # trigger release
         lock.release()
         lock2.acquire()
     t = threading.Thread(target=f)
@@ -172,7 +172,7 @@ def test_dealloc_other_thread():
     assert seen == []
     lock2.release()
     lock.acquire()
-    assert seen == [greenlet.GreenletExit]
+    assert seen == [greenstack.GreenstackExit]
     lock2.release()
     t.join()
 
@@ -180,9 +180,9 @@ def test_frame():
     def f1():
         f = sys._getframe(0)
         assert f.f_back == None
-        greenlet.getcurrent().parent.switch(f)
+        greenstack.getcurrent().parent.switch(f)
         return "meaning of life"
-    g = greenlet(f1)
+    g = greenstack(f1)
     frame = g.switch()
     assert frame is g.gr_frame
     assert g
@@ -193,7 +193,7 @@ def test_frame():
 
 def test_thread_bug():
     def runner(x):
-        g = greenlet(lambda: time.sleep(x))
+        g = greenstack(lambda: time.sleep(x))
         g.switch()
     t1 = threading.Thread(target=runner, args=(0.2,))
     t2 = threading.Thread(target=runner, args=(0.3,))
@@ -206,14 +206,14 @@ def test_switch_kwargs():
     def foo(a, b):
         assert a == 4
         assert b == 2
-    greenlet(foo).switch(a=4, b=2)
+    greenstack(foo).switch(a=4, b=2)
 
 def test_switch_kwargs_to_parent():
     def foo(x):
-        greenlet.getcurrent().parent.switch(x=x)
-        greenlet.getcurrent().parent.switch(2, x=3)
+        greenstack.getcurrent().parent.switch(x=x)
+        greenstack.getcurrent().parent.switch(2, x=3)
         return x, x ** 2
-    g = greenlet(foo)
+    g = greenstack(foo)
     assert {'x': 3} == g.switch(3)
     assert ((2,), {'x': 3}) == g.switch()
     assert (3, 9) == g.switch()
@@ -225,7 +225,7 @@ def test_switch_to_another_thread():
     done_event = threading.Event()
 
     def foo():
-        data['g'] = greenlet(lambda: None)
+        data['g'] = greenstack(lambda: None)
         created_event.set()
         done_event.wait()
     thread = threading.Thread(target=foo)
@@ -233,9 +233,9 @@ def test_switch_to_another_thread():
     created_event.wait()
     try:
         data['g'].switch()
-    except greenlet.error:
+    except greenstack.error:
         error = sys.exc_info()[1]
-    assert error != None, "greenlet.error was not raised!"
+    assert error != None, "greenstack.error was not raised!"
     done_event.set()
     thread.join()
 
@@ -245,22 +245,22 @@ def test_exc_state():
             raise ValueError('fun')
         except:
             exc_info = sys.exc_info()
-            greenlet(h).switch()
+            greenstack(h).switch()
             assert exc_info == sys.exc_info()
 
     def h():
         assert sys.exc_info() == (None, None, None)
 
-    greenlet(f).switch()
+    greenstack(f).switch()
 
 def test_instance_dict():
     def f():
-        greenlet.getcurrent().test = 42
+        greenstack.getcurrent().test = 42
     def deldict(g):
         del g.__dict__
     def setdict(g, value):
         g.__dict__ = value
-    g = greenlet(f)
+    g = greenstack(f)
     assert g.__dict__ == {}
     g.switch()
     assert g.test == 42
@@ -278,12 +278,12 @@ def test_threaded_reparent():
     done_event = threading.Event()
 
     def foo():
-        data['g'] = greenlet(lambda: None)
+        data['g'] = greenstack(lambda: None)
         created_event.set()
         done_event.wait()
 
     def blank():
-        greenlet.getcurrent().parent.switch()
+        greenstack.getcurrent().parent.switch()
 
     def setparent(g, value):
         g.parent = value
@@ -291,7 +291,7 @@ def test_threaded_reparent():
     thread = threading.Thread(target=foo)
     thread.start()
     created_event.wait()
-    g = greenlet(blank)
+    g = greenstack(blank)
     g.switch()
     with pytest.raises(ValueError):
         setparent(g, data['g'])
@@ -301,24 +301,24 @@ def test_threaded_reparent():
 def test_deepcopy():
     import copy
     with pytest.raises(TypeError):
-        copy.copy(greenlet())
+        copy.copy(greenstack())
     with pytest.raises(TypeError):
-        copy.deepcopy(greenlet())
+        copy.deepcopy(greenstack())
 
 def test_parent_restored_on_kill():
-    hub = greenlet(lambda: None)
-    main = greenlet.getcurrent()
+    hub = greenstack(lambda: None)
+    main = greenstack.getcurrent()
     result = []
     def worker():
         try:
             # Wait to be killed
             main.switch()
-        except greenlet.GreenletExit:
+        except greenstack.GreenstackExit:
             # Resurrect and switch to parent
-            result.append(greenlet.getcurrent().parent)
-            result.append(greenlet.getcurrent())
+            result.append(greenstack.getcurrent().parent)
+            result.append(greenstack.getcurrent())
             hub.switch()
-    g = greenlet(worker, parent=hub)
+    g = greenstack(worker, parent=hub)
     g.switch()
     del g
     assert result
@@ -327,49 +327,49 @@ def test_parent_restored_on_kill():
 
 def test_parent_return_failure():
     # No run causes AttributeError on switch
-    g1 = greenlet()
-    # Greenlet that implicitly switches to parent
-    g2 = greenlet(lambda: None, parent=g1)
+    g1 = greenstack()
+    # greenstack that implicitly switches to parent
+    g2 = greenstack(lambda: None, parent=g1)
     # AttributeError should propagate to us, no fatal errors
     with pytest.raises(AttributeError):
         g2.switch()
 
 def test_throw_exception_not_lost():
-    class mygreenlet(greenlet):
+    class mygreenstack(greenstack):
         def __getattribute__(self, name):
             try:
                 raise Exception()
             except:
                 pass
-            return greenlet.__getattribute__(self, name)
-    g = mygreenlet(lambda: None)
+            return greenstack.__getattribute__(self, name)
+    g = mygreenstack(lambda: None)
     with pytest.raises(SomeError):
         g.throw(SomeError())
 
 def test_throw_doesnt_crash():
     result = []
     def worker():
-        greenlet.getcurrent().parent.switch()
+        greenstack.getcurrent().parent.switch()
     def creator():
-        g = greenlet(worker)
+        g = greenstack(worker)
         g.switch()
         result.append(g)
     t = threading.Thread(target=creator)
     t.start()
     t.join()
-    with pytest.raises(greenlet.error):
+    with pytest.raises(greenstack.error):
         result[0].throw(SomeError())
 
 def test_recursive_startup():
-    class convoluted(greenlet):
+    class convoluted(greenstack):
         def __init__(self):
-            greenlet.__init__(self)
+            greenstack.__init__(self)
             self.count = 0
         def __getattribute__(self, name):
             if name == 'run' and self.count == 0:
                 self.count = 1
                 self.switch(43)
-            return greenlet.__getattribute__(self, name)
+            return greenstack.__getattribute__(self, name)
         def run(self, value):
             while True:
                 self.parent.switch(value)
@@ -379,19 +379,19 @@ def test_recursive_startup():
 def test_unexpected_reparenting():
     another = []
     def worker():
-        g = greenlet(lambda: None)
+        g = greenstack(lambda: None)
         another.append(g)
         g.switch()
     t = threading.Thread(target=worker)
     t.start()
     t.join()
-    class convoluted(greenlet):
+    class convoluted(greenstack):
         def __getattribute__(self, name):
             if name == 'run':
                 self.parent = another[0]
-            return greenlet.__getattribute__(self, name)
+            return greenstack.__getattribute__(self, name)
     g = convoluted(lambda: None)
-    with pytest.raises(greenlet.error):
+    with pytest.raises(greenstack.error):
         g.switch()
 
 def test_threaded_updatecurrent():
@@ -403,24 +403,24 @@ def test_threaded_updatecurrent():
     lock2.acquire()
     class finalized(object):
         def __del__(self):
-            # happens while in green_updatecurrent() in main greenlet
+            # happens while in green_updatecurrent() in main greenstack
             # should be very careful not to accidentally call it again
             # at the same time we must make sure another thread executes
             lock2.release()
             lock1.acquire()
             # now ts_current belongs to another thread
     def deallocator():
-        greenlet.getcurrent().parent.switch()
+        greenstack.getcurrent().parent.switch()
     def fthread():
         lock2.acquire()
-        greenlet.getcurrent()
+        greenstack.getcurrent()
         del g[0]
         lock1.release()
         lock2.acquire()
-        greenlet.getcurrent()
+        greenstack.getcurrent()
         lock1.release()
-    main = greenlet.getcurrent()
-    g = [greenlet(deallocator)]
+    main = greenstack.getcurrent()
+    g = [greenstack(deallocator)]
     g[0].bomb = finalized()
     g[0].switch()
     t = threading.Thread(target=fthread)
@@ -437,7 +437,7 @@ def test_threaded_updatecurrent():
     # check for this case at the end of green_updatecurrent(). This test
     # passes if getcurrent() returns correct result, but it's likely
     # to randomly crash if it's not anyway.
-    assert greenlet.getcurrent() == main
+    assert greenstack.getcurrent() == main
     # wait for another thread to complete, just in case
     t.join()
 
@@ -445,22 +445,22 @@ def test_dealloc_switch_args_not_lost():
     seen = []
     def worker():
         # wait for the value
-        value = greenlet.getcurrent().parent.switch()
+        value = greenstack.getcurrent().parent.switch()
         # delete all references to ourself
         del worker[0]
-        initiator.parent = greenlet.getcurrent().parent
+        initiator.parent = greenstack.getcurrent().parent
         # switch to main with the value, but because
         # ts_current is the last reference to us we
         # return immediately
         try:
-            greenlet.getcurrent().parent.switch(value)
+            greenstack.getcurrent().parent.switch(value)
         finally:
-            seen.append(greenlet.getcurrent())
+            seen.append(greenstack.getcurrent())
     def initiator():
         return 42 # implicitly falls thru to parent
-    worker = [greenlet(worker)]
+    worker = [greenstack(worker)]
     worker[0].switch() # prime worker
-    initiator = greenlet(initiator, worker[0])
+    initiator = greenstack(initiator, worker[0])
     value = initiator.switch()
     assert seen
     assert value == 42
@@ -470,20 +470,20 @@ if sys.version_info[0] == 2:
     def test_tuple_subclass():
         class mytuple(tuple):
             def __len__(self):
-                greenlet.getcurrent().switch()
+                greenstack.getcurrent().switch()
                 return tuple.__len__(self)
         args = mytuple()
         kwargs = dict(a=42)
         def switchapply():
-            apply(greenlet.getcurrent().parent.switch, args, kwargs)
-        g = greenlet(switchapply)
+            apply(greenstack.getcurrent().parent.switch, args, kwargs)
+        g = greenstack(switchapply)
         assert g.switch() == kwargs
 
 if ABCMeta is not None and abstractmethod is not None:
     def test_abstract_subclasses():
         AbstractSubclass = ABCMeta(
             'AbstractSubclass',
-            (greenlet,),
+            (greenstack,),
             {'run': abstractmethod(lambda self: None)})
 
         class BadSubclass(AbstractSubclass):
@@ -511,7 +511,7 @@ def test_implicit_parent_with_threads():
         recycled = [False]
         def another_thread():
             lock1.acquire() # wait for gc
-            greenlet.getcurrent() # update ts_current
+            greenstack.getcurrent() # update ts_current
             lock2.release() # release gc
         t = threading.Thread(target=another_thread)
         t.start()
@@ -526,7 +526,7 @@ def test_implicit_parent_with_threads():
                 self.callback = gc_callback()
         l = []
         x = range(N*2)
-        current = greenlet.getcurrent()
+        current = greenstack.getcurrent()
         g = garbage()
         for i in x:
             g = None # lose reference to garbage
@@ -534,7 +534,7 @@ def test_implicit_parent_with_threads():
                 # gc callback called prematurely
                 t.join()
                 return False
-            last = greenlet()
+            last = greenstack()
             if recycled[0]:
                 break # yes! gc called in green_new
             l.append(last) # increase allocation counter

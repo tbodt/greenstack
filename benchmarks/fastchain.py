@@ -9,7 +9,7 @@ def link(value):
     if value == num_links:
         print 'Result:'
         return;
-    g = greenstack.greenlet(link)
+    g = greenstack.greenstack(link)
     g.parent = main
     g.switch(value + 1)
 

@@ -26,12 +26,12 @@ static PyObject* test_exception_switch_recurse(int depth, int left)
 	}
 
 	PyObject* result = NULL;
-	PyStackGreenlet* self = PyStackGreenlet_GetCurrent();
+	PyGreenstack* self = PyGreenstack_GetCurrent();
 	if (self == NULL)
 		return NULL;
 
 	try {
-		PyStackGreenlet_Switch(self->parent, NULL, NULL);
+		PyGreenstack_Switch(self->parent, NULL, NULL);
 		p_test_exception_throw(depth);
 		PyErr_SetString(PyExc_RuntimeError, "throwing C++ exception didn't work");
 	} catch(exception_t& e) {
@@ -104,8 +104,8 @@ init_test_extension_cpp(void)
 		INITERROR;
 	}
 
-	PyStackGreenlet_Import();
-	if (_PyStackGreenlet_API == NULL) {
+	PyGreenstack_Import();
+	if (_PyGreenstack_API == NULL) {
 		INITERROR;
 	}
 

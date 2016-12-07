@@ -1,11 +1,11 @@
 import sys
 
-from greenstack import greenlet
+from greenstack import greenstack
 import pytest
 
 
 def switch(*args):
-    return greenlet.getcurrent().parent.switch(*args)
+    return greenstack.getcurrent().parent.switch(*args)
 
 
 def test_class():
@@ -16,7 +16,7 @@ def test_class():
             switch("ok")
             return
         switch("fail")
-    g = greenlet(f)
+    g = greenstack(f)
     res = g.switch()
     assert res == "ok"
     res = g.throw(RuntimeError)
@@ -33,13 +33,13 @@ def test_val():
                 return
         switch("fail")
 
-    g = greenlet(f)
+    g = greenstack(f)
     res = g.switch()
     assert res == "ok"
     res = g.throw(RuntimeError("ciao"))
     assert res == "ok"
 
-    g = greenlet(f)
+    g = greenstack(f)
     res = g.switch()
     assert res == "ok"
     res = g.throw(RuntimeError, "ciao")
@@ -49,17 +49,17 @@ def test_kill():
     def f():
         switch("ok")
         switch("fail")
-    g = greenlet(f)
+    g = greenstack(f)
     res = g.switch()
     assert res == "ok"
     res = g.throw()
-    assert isinstance(res, greenlet.GreenletExit)
+    assert isinstance(res, greenstack.GreenstackExit)
     assert g.dead
-    res = g.throw()    # immediately eaten by the already-dead greenlet
-    assert isinstance(res, greenlet.GreenletExit)
+    res = g.throw()    # immediately eaten by the already-dead greenstack
+    assert isinstance(res, greenstack.GreenstackExit)
 
 def test_throw_goes_to_original_parent():
-    main = greenlet.getcurrent()
+    main = greenstack.getcurrent()
 
     def f1():
         try:
@@ -72,15 +72,15 @@ def test_throw_goes_to_original_parent():
     def f2():
         main.switch("from f2")
 
-    g1 = greenlet(f1)
-    g2 = greenlet(f2, parent=g1)
+    g1 = greenstack(f1)
+    g2 = greenstack(f2, parent=g1)
     with pytest.raises(IndexError):
         g2.throw(IndexError)
     assert g2.dead
     assert g1.dead
 
-    g1 = greenlet(f1)
-    g2 = greenlet(f2, parent=g1)
+    g1 = greenstack(f1)
+    g2 = greenstack(f2, parent=g1)
     res = g1.switch()
     assert res == "f1 ready to catch"
     res = g2.throw(IndexError)
@@ -88,8 +88,8 @@ def test_throw_goes_to_original_parent():
     assert g2.dead
     assert g1.dead
 
-    g1 = greenlet(f1)
-    g2 = greenlet(f2, parent=g1)
+    g1 = greenstack(f1)
+    g2 = greenstack(f2, parent=g1)
     res = g1.switch()
     assert res == "f1 ready to catch"
     res = g2.switch()

@@ -39,6 +39,13 @@ Differences from Greenlet
   uses libcoro to do stack switching, which can use either assembler code,
   setjmp/sigaltstack, ucontext, or fibers depending on the platform.
 
+* Greenstack renames the greenlet type to greenstack and GreenletExit to
+  GreenstackExit. However, the old names are still available for
+  compatibility's sake.
+
+* Greenstack includes an API for custom state saving/restoring available from
+  C.
+
 Example
 -------
 
@@ -361,6 +368,36 @@ based code there are new functions in the greenstack module:
     potentially something else. This way API can be extended to new events
     similar to ``sys.settrace()``.
 
+Custom state handlers
+---------------------
+
+If you're writing a C extension with some thread-local state that you'd like to
+be greenstack-local, you can use the state handler API to add custom code to the
+switching process to save and restore it. The API requires you to specify two
+functions. The first one is the switch wrapper, which should save all state
+into local variables, call ``PyGreenstack_CALL_NEXT`` with the parameter, and
+restore state from the local variables. ::
+
+    // spam is a global variable
+    void spam_switchwrapper(void *next) {
+        int local_spam = spam;
+        PyGreenstack_CALL_NEXT(next);
+        spam = local_spam;
+    }
+
+The second is the init state function, which should initialize the global state
+to what it should be in a newly created greenstack. ::
+
+    void spam_initstate() {
+        spam = 0;
+    }
+
+You then need to register these functions using ``PyGreenstack_AddStateHandler``::
+
+    PyGreenstack_AddStateHandler(spam_switchwrapper, spam_initstate);
+
+And you're done!
+
 C API Reference
 ===============
 
@@ -430,6 +467,10 @@ Reference
     Switches to greenstack ``g``, but immediately raise an exception of type
     ``typ`` with the value ``val``, and optionally, the traceback object
     ``tb``. ``tb`` can be NULL.
+
+``int PyGreenstack_AddStateHandler(switchwrapperfunc wrapper, stateinitfunc stateinit)``
+    Adds a state handler with the two specified functions. There is currently
+    no API to remove state handlers.
 
 Indices and tables
 ==================

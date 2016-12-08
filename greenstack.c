@@ -2,14 +2,10 @@
 
 #define GREENSTACK_MODULE
 
+/* explaination of everything would go here but i'm probably just going to delete this */
+
 #include "greenstack.h"
 #include "structmember.h"
-
-/* 
- * To reduce the cost of allocating and destroying stacks for greenstacks,
- * greenstack stacks are never destroyed. Instead they are saved in a stack (a
- * stack of stacks, if you will) and reused for future greenstacks. 
- */
 
 /* Python <= 2.5 support */
 #if PY_MAJOR_VERSION < 3
@@ -59,6 +55,8 @@ extern PyTypeObject PyGreenstack_Type;
      using the dictionary key 'ts_curkey'.
 */
 
+/* Weak reference to the switching-to greenlet during the slp switch */
+static PyGreenstack* volatile ts_target = NULL;
 /* Strong reference to the switching from greenstack after the switch */
 static PyGreenstack* volatile ts_origin = NULL;
 /* Strong reference to the current greenstack in this thread state */
@@ -85,10 +83,25 @@ static PyObject* PyExc_GreenstackExit;
 static PyObject* ts_empty_tuple;
 static PyObject* ts_empty_dict;
 
+/* 
+ * To reduce the cost of allocating and destroying stacks for greenstacks,
+ * greenstack stacks are never destroyed. Instead they are saved in a stack (a
+ * stack of stacks, if you will) and reused for future greenstacks. 
+ */
+
 #define STACK_CACHE_SIZE 8192
 #define STACK_CACHE_FULL (stack_cache_top >= STACK_CACHE_SIZE)
 static struct coro_stack stack_cache[STACK_CACHE_SIZE];
 static int stack_cache_top;
+
+typedef struct _statehandler statehandler;
+static void g_realswitchstack();
+static statehandler main_statehandler = {
+	g_realswitchstack, /* switchwrapper */
+	NULL,              /* stateinit */
+	NULL
+};
+static statehandler *statehandlers = &main_statehandler;
 
 #if GREENSTACK_USE_GC
 #define GREENSTACK_GC_FLAGS Py_TPFLAGS_HAVE_GC
@@ -220,7 +233,7 @@ static PyObject* green_statedict(PyGreenstack* g)
 
 /***********************************************************/
 
-static void g_switchstack(PyGreenstack *target)
+static void g_realswitchstack()
 {
 	PyThreadState *tstate;
 	PyGreenstack *current;
@@ -237,10 +250,10 @@ static void g_switchstack(PyGreenstack *target)
 	exc_traceback = tstate->exc_traceback;
 
 	ts_origin = current;
-	Py_INCREF(target);
-	ts_current = target;
+	Py_INCREF(ts_target);
+	ts_current = ts_target;
 
-	coro_transfer(&current->context, &target->context);
+	coro_transfer(&current->context, &ts_target->context);
 
 	/* restore state */
 	tstate = PyThreadState_GET();
@@ -249,6 +262,12 @@ static void g_switchstack(PyGreenstack *target)
 	tstate->exc_type = exc_type;
 	tstate->exc_value = exc_value;
 	tstate->exc_traceback = exc_traceback;
+}
+
+static void g_switchstack(PyGreenstack *target) {
+	ts_target = target;
+	PyGreenstack_CALL_SWITCH(statehandlers);
+	ts_target = NULL;
 }
 
 static int g_create(PyGreenstack *self, PyObject *args, PyObject *kwargs);
@@ -478,6 +497,13 @@ static void g_trampoline(struct trampoline_data *data) {
 	tstate->exc_type = NULL;
 	tstate->exc_value = NULL;
 	tstate->exc_traceback = NULL;
+	statehandler *handler = statehandlers;
+	while (handler != NULL) {
+		if (handler->stateinit != NULL) {
+			handler->stateinit();
+		}
+		handler = handler->next;
+	}
 
 	if (args == NULL) {
 		/* pending exception */
@@ -1169,6 +1195,19 @@ PyGreenstack_Throw(PyGreenstack *self, PyObject *typ, PyObject *val, PyObject *t
 	return throw_greenstack(self, typ, val, tb);
 }
 
+int PyGreenstack_AddStateHandler(switchwrapperfunc wrapper, stateinitfunc stateinit) {
+	statehandler *new_handler = (statehandler *) malloc(sizeof(statehandler));
+	if (new_handler == NULL) {
+		PyErr_NoMemory();
+		return -1;
+	}
+	new_handler->wrapper = wrapper;
+	new_handler->stateinit = stateinit;
+	new_handler->next = statehandlers;
+	statehandlers = new_handler;
+	return 0;
+}
+
 /** End C API ****************************************************************/
 
 static PyMethodDef green_methods[] = {
@@ -1317,6 +1356,7 @@ static char* copy_on_greentype[] = {
 	"getcurrent",
 	"error",
 	"GreenstackExit",
+	"GreenletExit",
 #if GREENSTACK_USE_TRACING
 	"settrace",
 	"gettrace",
@@ -1426,10 +1466,12 @@ initgreenstack(void)
 
 	Py_INCREF(&PyGreenstack_Type);
 	PyModule_AddObject(m, "greenstack", (PyObject*) &PyGreenstack_Type);
+	PyModule_AddObject(m, "greenlet", (PyObject*) &PyGreenstack_Type);
 	Py_INCREF(PyExc_GreenstackError);
 	PyModule_AddObject(m, "error", PyExc_GreenstackError);
 	Py_INCREF(PyExc_GreenstackExit);
 	PyModule_AddObject(m, "GreenstackExit", PyExc_GreenstackExit);
+	PyModule_AddObject(m, "GreenletExit", PyExc_GreenstackExit);
 	PyModule_AddObject(m, "GREENSTACK_USE_GC", PyBool_FromLong(GREENSTACK_USE_GC));
 	PyModule_AddObject(m, "GREENSTACK_USE_TRACING", PyBool_FromLong(GREENSTACK_USE_TRACING));
 
@@ -1460,6 +1502,8 @@ initgreenstack(void)
 	_PyGreenstack_API[PyGreenstack_Switch_NUM] = (void *) PyGreenstack_Switch;
 	_PyGreenstack_API[PyGreenstack_SetParent_NUM] =
 		(void *) PyGreenstack_SetParent;
+	_PyGreenstack_API[PyGreenstack_AddStateHandler_NUM] =
+		(void *) PyGreenstack_AddStateHandler;
 
 #ifdef GREENSTACK_USE_PYCAPSULE
 	c_api_object = PyCapsule_New((void *) _PyGreenstack_API, "greenstack._C_API", NULL);

@@ -45,15 +45,17 @@ typedef struct _greenstack {
 #endif
 
 typedef void (*switchwrapperfunc)(void *);
+typedef void (*stateinitfunc)();
 
-struct _switchwrapper {
-	switchwrapperfunc func;
-	struct _switchwrapper *next;
+struct _statehandler {
+	switchwrapperfunc wrapper;
+	stateinitfunc stateinit;
+	struct _statehandler *next;
 };
 
 #define PyGreenstack_CALL_SWITCH(next_void) { \
-	struct _switchwrapper *next = (struct _switchwrapper *) next_void; \
-	next->func(next->next); \
+	struct _statehandler *next = (struct _statehandler *) next_void; \
+	next->wrapper(next->next); \
 }
 
 /* C API functions */
@@ -70,8 +72,7 @@ struct _switchwrapper {
 #define PyGreenstack_Throw_NUM      5
 #define PyGreenstack_Switch_NUM     6
 #define PyGreenstack_SetParent_NUM  7
-#define PyGreenstack_AddSwitchWrapper_NUM 8
-#define PyGreenstack_RemoveSwitchWrapper_NUM 9
+#define PyGreenstack_AddStateHandler_NUM 8
 
 #ifndef GREENSTACK_MODULE
 /* This section is used by modules that uses the greenstack C API */
@@ -135,18 +136,11 @@ static void **_PyGreenstack_API = NULL;
 	 _PyGreenstack_API[PyGreenstack_SetParent_NUM])
 
 /*
- * PyGreenstack_AddSwitchWrapper(switchwrapperfunc wrapper)
+ * PyGreenstack_AddStateHandler(switchwrapperfunc wrapper, stateinitfunc stateinit)
  */
-#define PyGreenstack_AddSwitchWrapper \
-	(* (int (*)(switchwrapperfunc wrapper)) \
-	_PyGreenstack_API[PyGreenstack_AddSwitchWrapper_NUM])
-
-/*
- * PyGreenstack_RemoveSwitchWrapper(switchwrapperfunc wrapper)
- */
-#define PyGreenstack_RemoveSwitchWrapper \
-	(* (int (*)(switchwrapperfunc wrapper)) \
-	_PyGreenstack_API[PyGreenstack_RemoveSwitchWrapper_NUM])
+#define PyGreenstack_AddStateHandler \
+	(* (int (*)(switchwrapperfunc wrapper, stateinitfunc stateinit)) \
+	_PyGreenstack_API[PyGreenstack_AddStateHandler_NUM])
 
 /* Macro that imports greenstack and initializes C API */
 #ifdef GREENSTACK_USE_PYCAPSULE

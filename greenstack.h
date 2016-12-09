@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define GREENSTACK_VERSION "0.4.10"
+#define GREENSTACK_VERSION "0.6"
 
 typedef struct _greenstack {
 	PyObject_HEAD

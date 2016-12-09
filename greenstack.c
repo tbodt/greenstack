@@ -99,7 +99,7 @@ static int stack_cache_top;
  * from g_trampoline. */
 
 typedef struct _statehandler statehandler;
-static void g_realswitchstack();
+static void g_realswitchstack(void *);
 static statehandler main_statehandler = {
 	g_realswitchstack, /* switchwrapper */
 	NULL,              /* stateinit */
@@ -237,7 +237,7 @@ static PyObject* green_statedict(PyGreenstack* g)
 
 /***********************************************************/
 
-static void g_realswitchstack()
+static void g_realswitchstack(void *next)
 {
 	PyThreadState *tstate;
 	PyGreenstack *current;

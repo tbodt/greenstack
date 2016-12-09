@@ -45,7 +45,7 @@ typedef struct _greenstack {
 #endif
 
 typedef void (*switchwrapperfunc)(void *);
-typedef void (*stateinitfunc)();
+typedef void (*stateinitfunc)(void);
 
 struct _statehandler {
 	switchwrapperfunc wrapper;

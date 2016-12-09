@@ -55,7 +55,7 @@ extern PyTypeObject PyGreenstack_Type;
      using the dictionary key 'ts_curkey'.
 */
 
-/* Weak reference to the switching-to greenlet during the slp switch */
+/* Weak reference to the switching-to greenstack during the slp switch */
 static PyGreenstack* volatile ts_target = NULL;
 /* Strong reference to the switching from greenstack after the switch */
 static PyGreenstack* volatile ts_origin = NULL;
@@ -93,6 +93,10 @@ static PyObject* ts_empty_dict;
 #define STACK_CACHE_FULL (stack_cache_top >= STACK_CACHE_SIZE)
 static struct coro_stack stack_cache[STACK_CACHE_SIZE];
 static int stack_cache_top;
+
+/* State handlers are used by C extensions to save and restore custom state.
+ * Switch wrappers are called by g_switch and state initializers are called
+ * from g_trampoline. */
 
 typedef struct _statehandler statehandler;
 static void g_realswitchstack();
@@ -1356,7 +1360,6 @@ static char* copy_on_greentype[] = {
 	"getcurrent",
 	"error",
 	"GreenstackExit",
-	"GreenletExit",
 #if GREENSTACK_USE_TRACING
 	"settrace",
 	"gettrace",
@@ -1466,12 +1469,10 @@ initgreenstack(void)
 
 	Py_INCREF(&PyGreenstack_Type);
 	PyModule_AddObject(m, "greenstack", (PyObject*) &PyGreenstack_Type);
-	PyModule_AddObject(m, "greenlet", (PyObject*) &PyGreenstack_Type);
 	Py_INCREF(PyExc_GreenstackError);
 	PyModule_AddObject(m, "error", PyExc_GreenstackError);
 	Py_INCREF(PyExc_GreenstackExit);
 	PyModule_AddObject(m, "GreenstackExit", PyExc_GreenstackExit);
-	PyModule_AddObject(m, "GreenletExit", PyExc_GreenstackExit);
 	PyModule_AddObject(m, "GREENSTACK_USE_GC", PyBool_FromLong(GREENSTACK_USE_GC));
 	PyModule_AddObject(m, "GREENSTACK_USE_TRACING", PyBool_FromLong(GREENSTACK_USE_TRACING));
 

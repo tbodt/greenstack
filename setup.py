@@ -46,12 +46,12 @@ from my_build_ext import build_ext
 
 setup(
     name="greenstack",
-    version='0.4.10',
+    version='0.6',
     description='Lightweight in-process concurrent programming',
     long_description=readfile("README.rst"),
     maintainer="Theodore Dubois",
     maintainer_email="tblodt@icloud.com",
-    url="http://github.com/tbodt/greenstack",
+    url="https://github.com/tbodt/greenstack",
     license="MIT License",
     platforms=['any'],
     headers=headers,

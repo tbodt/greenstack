@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name='greenstack-greenlet',
-    version='1.0',
+    version='1.0.1',
     description='Greenlet compatibility for Greenstack',
     long_description=open('README.rst').read(),
     author='Theodore Dubois',

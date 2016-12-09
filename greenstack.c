@@ -466,6 +466,10 @@ static void g_trampoline(struct trampoline_data *data) {
 	PyThreadState *tstate;
 	PyObject *result, *o;
 	PyGreenstack *parent;
+#if GREENSTACK_USE_TRACING
+	PyObject *tracefunc;
+#endif
+	statehandler *handler;
 
 	PyGreenstack *self = data->self;
 	PyObject *run = data->run;
@@ -479,7 +483,6 @@ static void g_trampoline(struct trampoline_data *data) {
 	Py_XDECREF(o);
 
 #if GREENSTACK_USE_TRACING
-	PyObject *tracefunc;
 	if ((tracefunc = PyDict_GetItem(ts_current->run_info, ts_tracekey)) != NULL) {
 		Py_INCREF(tracefunc);
 		if (g_calltrace(tracefunc, args ? ts_event_switch : ts_event_throw, ts_origin, ts_current) < 0) {
@@ -501,7 +504,7 @@ static void g_trampoline(struct trampoline_data *data) {
 	tstate->exc_type = NULL;
 	tstate->exc_value = NULL;
 	tstate->exc_traceback = NULL;
-	statehandler *handler = statehandlers;
+	handler = statehandlers;
 	while (handler != NULL) {
 		if (handler->stateinit != NULL) {
 			handler->stateinit();

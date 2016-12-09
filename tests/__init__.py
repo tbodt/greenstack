@@ -1,6 +1,6 @@
 import os
 import glob
-
+import unittest
 from distutils.core import setup, Extension
 
 TEST_EXTENSIONS = [

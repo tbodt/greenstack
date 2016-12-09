@@ -56,12 +56,6 @@ setup(
     platforms=['any'],
     headers=headers,
     ext_modules=ext_modules,
-    packages=['greenlet'],
-    setup_requires=['pytest-runner'],
-    tests_require=['pytest'],
-    extras_require={
-        'python_version==3.2': ['pytest<3'],
-    },
     cmdclass=dict(build_ext=build_ext),
     classifiers=[
         'Intended Audience :: Developers',

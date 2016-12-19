@@ -1,14 +1,15 @@
 #!/usr/bin/env python
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='greenstack-greenlet',
-    version='1.0.1',
+    version='1.0.2',
     description='Greenlet compatibility for Greenstack',
     long_description=open('README.rst').read(),
     author='Theodore Dubois',
     author_email='tblodt@icloud.com',
     url='https://github.com/tbodt/greenstack/tree/master/greenstack-greenlet',
+    packages=find_packages(),
     install_requires=['greenstack'],
     license='MIT License',
     platforms=['any'],

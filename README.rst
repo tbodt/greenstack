@@ -2,8 +2,12 @@
 Greenstack: Cooperative green threads in Python
 ===============================================
 
-.. image:: https://travis-ci.org/tbodt/greenstack.svg?branch=master
+|travis| |pypi| |downloads|
+
+.. |travis| image:: https://travis-ci.org/tbodt/greenstack.svg?branch=master
     :target: https://travis-ci.org/tbodt/greenstack
+.. |pypi| image:: https://img.shields.io/pypi/v/greenstack.svg
+.. |downloads| image:: https://img.shields.io/pypi/dm/greenstack.svg
 
 Greenstack is a fork of greenlet, which is a spin-off of `Stackless`_, a
 version of CPython that supports micro-threads called "tasklets".  Tasklets run
@@ -30,10 +34,12 @@ Greenlets are coroutines for in-process concurrent programming.
 Getting Greenstack
 ==================
 
-Currently, the only way to get Greenstack is by building it from source::
+Greenstack is on pypi, so you can install it thus::
 
-    git clone git@github.com:tbodt/greenstack
-    cd greenstack
-    ./setup.py install
+    pip install greenstack
 
-This will change soon.
+If you're using a library such as Gevent or Eventlet that directly uses greenlet,
+you can install ``greenstack-greenlet``. This installs a
+```greenlet/__init__.py`` file`__ that makes Greenstack look like Greenlet.
+
+__ https://github.com/tbodt/greenstack/blob/master/greenstack-greenlet/greenlet/__init__.py
